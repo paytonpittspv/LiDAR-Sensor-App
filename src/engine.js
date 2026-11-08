@@ -84,7 +84,7 @@ const Engine = (() => {
   const STEP_HZ = 7;       // keeps the per-step speed wobble, only used to find foot contacts
   const RAW_HZ = 12;
   const STRIDE_S = 0.46;
-  let SHARPEN = false, REPAIR = true;   // one stride (two steps) for the speed curve and top speed       // "raw speed" line drawn on charts
+  let SHARPEN = false, REPAIR = true, FLIGHT_DROP = 0.05, FLIGHT_LAG = 0.045;   // one stride (two steps) for the speed curve and top speed       // "raw speed" line drawn on charts
   function lines(tr) {
     const ds = filtfilt(tr.d, SMOOTH_HZ, tr.fs);
     const v = deriv(ds, tr.fs);
@@ -177,6 +177,23 @@ const Engine = (() => {
     }
     return out;
   }
+  // pole run off the runway: no box, so no plant. The takeoff shows up as the step rhythm stopping
+  // (in the air there are no foot contacts). Find the first contact after which the wobble dies away
+  // for most of a stride, once the athlete is near top speed; that contact is the takeoff.
+  function flightTakeoff(L, fs, kGo, kTopAll, n) {
+    // The takeoff step turns forward speed into lift: speed drops ~10% over that one contact, then holds
+    // steady in the air (no feet, no push) until the landing. Find the first drop after top speed that is
+    // followed by that steady stretch; the takeoff contact is just before the drop shows.
+    const win = Math.round(0.5 * fs), air = Math.round(0.25 * fs);
+    for (let k = kTopAll; k < n - air; k++) {
+      let mx = 0; for (let q = Math.max(0, k - win); q <= k; q += 5) mx = Math.max(mx, L.v[q]);
+      if (L.vStep[k] >= (1 - FLIGHT_DROP) * mx) continue;
+      // steady after: over the next 0.25 s the speed changes by less than half the drop again
+      const v0 = L.v[k + Math.round(0.05 * fs)], v1 = L.v[k + air];
+      if (Math.abs(v1 - v0) < 0.5 * FLIGHT_DROP * mx) return k - Math.round(FLIGHT_LAG * fs);
+    }
+    return null;
+  }
   // kAnchor = where we expect the last contact (the takeoff for vault)
   function trackSteps(L, fs, kGo, kEnd, kAnchor) {
     const kFrom = Math.max(0, kGo - Math.round(0.6 * fs)), kTo = Math.min(L.v.length - 1, kEnd + Math.round(0.2 * fs));
@@ -252,9 +269,11 @@ const Engine = (() => {
   }
 
   // ---------- main ----------
-  // ctx: { mode: "sprint", target: m } | { mode: "vault", setup: "runway100" | "runway150" | "polerun" }, mass (kg, optional)
+  // ctx: { mode: "sprint", target: m } | { mode: "vault", setup: "runway100" | "runway150" | "polerun100" | "polerun150" }, mass (kg, optional)
   function process(raw, ctx) {
-    const boxM = ctx.mode === "vault" && (ctx.setup === "runway100" || ctx.setup === "runway150") ? (ctx.setup === "runway100" ? 100 : 150) * FT : null;
+    // vault: the tripod is 100 or 150 ft from the box (on the runway) or from the box mark (pole runs);
+    // every distance is measured from there and nothing past it is used. (noBox: only for lining up simulations)
+    const boxM = ctx.mode === "vault" && !ctx.noBox ? (/150$/.test(ctx.setup || "") ? 150 : 100) * FT : null;
     const tr = track(raw, boxM ? Math.round(boxM * 100) : null); if (tr.error) return tr;
     const fs = tr.fs, L = lines(tr), n = tr.d.length;
     // top speed of the whole recording (to find the run)
@@ -294,7 +313,9 @@ const Engine = (() => {
     // vault / pole run: count back from the takeoff (the plant shows up as a sudden ~10% drop in speed,
     // about 0.045 s after the takeoff contact); sprint: from the last contact before the finish
     let kAnchor = kEnd;
-    if (ctx.mode === "vault") {
+    const poleRun = ctx.mode === "vault" && /^polerun/.test(ctx.setup || "");
+    if (poleRun) { const k = flightTakeoff(L, fs, kGo, kTopAll, n); if (k != null) { kAnchor = k; kEnd = Math.max(kEnd, k + Math.round(0.2 * fs)); } }
+    else if (ctx.mode === "vault") {
       const win = Math.round(0.5 * fs);
       for (let k = kTopAll; k < n; k++) {
         let mx = 0; for (let q = Math.max(0, k - win); q <= k; q += 5) mx = Math.max(mx, L.v[q]);
@@ -309,7 +330,13 @@ const Engine = (() => {
       stepKs = stepKs.filter((k) => k <= kAnchor + tol);
       const last = stepKs[stepKs.length - 1];
       if (last != null && Math.abs(last - kAnchor) <= tol) stepKs[stepKs.length - 1] = kAnchor;
-      else if (last == null || kAnchor - last > Math.round(0.16 * fs)) stepKs.push(kAnchor);
+      else if (last == null || kAnchor - last > Math.round(0.16 * fs)) {
+        // a gap of two or more steps before the takeoff means contacts were missed: fill them in at the running rhythm
+        const iv = []; for (let i = Math.max(1, stepKs.length - 4); i < stepKs.length; i++) iv.push(stepKs[i] - stepKs[i - 1]);
+        const Im = iv.length ? iv.sort((a, b) => a - b)[iv.length >> 1] : 0;
+        if (last != null && Im > 0) { const gaps = Math.round((kAnchor - last) / Im); for (let g = 1; g < gaps; g++) stepKs.push(Math.round(last + ((kAnchor - last) * g) / gaps)); }
+        stepKs.push(kAnchor);
+      }
       else stepKs[stepKs.length - 1] = kAnchor;
     }
     const takeoffK = ctx.mode === "vault" && stepKs.length ? stepKs[stepKs.length - 1] : null;
@@ -403,8 +430,8 @@ const Engine = (() => {
       res.prev5 = dTo - 10 >= dGo ? seg(dTo - 10, dTo - 5) : null;
       res.approachTime = kTo / fs - tGo;
       res.approachDist = dTo - dGo;
-      if (ctx.setup === "runway100" || ctx.setup === "runway150") {
-        const box = (ctx.setup === "runway100" ? 100 : 150) * FT;
+      if (boxM) {
+        const box = boxM;
         const LEAD = 0.5;   // takeoff foot is roughly this far ahead of the lower back the laser sees
         res.box = box;
         res.takeoff.outFt = (box - (dTo + LEAD)) / FT;
@@ -440,6 +467,11 @@ const Engine = (() => {
     const nSteps = o.steps || 40;
     for (let i = 0; i < nSteps; i++) { contacts.push(t); const iv = 0.235 + 0.16 * Math.exp(-i / 2.5); t += iv; }
     const vaultEnd = o.steps ? contacts[contacts.length - 1] : null;
+    // pole run (off the runway): after the takeoff there's a flight with no foot contacts,
+    // the athlete stays in the beam, then lands and jogs out
+    const land = o.popup && vaultEnd != null ? vaultEnd + (o.flight || 0.55) : null;
+    const runContacts = contacts.slice();
+    if (land != null) { let tt = land; for (let i = 0; i < 6; i++) { contacts.push(tt); tt += 0.3 + 0.03 * i; } }
     const dt = 1 / o.rate, T = [], D = [], truth = [];
     let x = 0, micros = 123456, endT = null;
     for (let i = 0; ; i++) {
@@ -453,13 +485,23 @@ const Engine = (() => {
       // dip at each contact
       let dip = 0; for (const c of contacts) { const u = (tm - c) / 0.05; if (u > -3 && u < 3) dip += Math.exp(-u * u); }
       let v = vb * (1 - o.dip * dip);
-      if (vaultEnd != null && tm > vaultEnd) v = vb * Math.max(0, 1 - (tm - vaultEnd) * 2.2);   // plant: speed falls away
+      if (vaultEnd != null && tm > vaultEnd && land == null) v = vb * Math.max(0, 1 - (tm - vaultEnd) * 2.2);   // plant: speed falls away
+      if (land != null && tm > vaultEnd) {
+        const vTo = o.vmax * (1 - Math.exp(-(vaultEnd - runStart) / o.tau)) + (o.finish || 0);
+        // the takeoff step turns some forward speed into lift (~10% lost over the contact), the air is steady,
+        // and the landing brakes before a jog-out
+        const loss = o.toLoss != null ? o.toLoss : 0.1, a = Math.min(1, Math.max(0, (tm - vaultEnd + 0.03) / 0.11));
+        const vAir = vTo * (1 - loss);
+        v = tm < land ? vTo * (1 - loss * a) * (1 - 0.01 * (tm - vaultEnd))
+          : vAir * 0.85 * Math.max(0.15, 1 - (tm - land) * 0.45) * (1 - o.dip * dip);
+      }
       x += v * dt; truth.push([tm, x]);
-      const done = o.target ? x > o.target + 3 : vaultEnd != null ? tm > vaultEnd + 0.45 : false;
+      const done = o.target ? x > o.target + 3 : land != null ? tm > land + 1.6 : vaultEnd != null ? tm > vaultEnd + 0.45 : false;
       if (done && endT == null) endT = tm;
       if (endT != null && tm > endT + 0.4) break;
       let cm;
-      if (vaultEnd != null && tm > vaultEnd + 0.35) cm = 0;   // athlete rises out of the beam
+      if (vaultEnd != null && tm > vaultEnd + 0.35 && land == null) cm = 0;   // athlete rises out of the beam
+      else if (land != null && tm > vaultEnd && tm < land && rnd() < 0.15) cm = 0;   // pop-up: hips rise, a few readings miss
       else { let meas = o.back + x + gauss() * o.noise; if (rnd() < 0.005) meas -= 1 + rnd() * 2; cm = Math.max(20, Math.round(meas * 100)); }
       micros += Math.round(1e6 / o.rate);
       const lag = rnd() < 0.03 ? Math.round(rnd() * 8000) : Math.round(rnd() * 300);
@@ -467,9 +509,9 @@ const Engine = (() => {
     }
     const atX = (X) => { for (const [tt, xx] of truth) if (xx >= X) return tt; return NaN; };
     const xAt = (tt) => { for (const [a, xx] of truth) if (a >= tt) return xx; return NaN; };
-    return { raw: { t: T, d: D, maxCm: 9900 }, truth: { atX, xAt, runStart, contacts, nRun: nSteps, vaultEnd } };
+    return { raw: { t: T, d: D, maxCm: 9900 }, truth: { atX, xAt, runStart, contacts: land != null ? runContacts : contacts, nRun: nSteps, vaultEnd, land } };
   }
 
-  return { process, simulate, FT, set sharpen(v) { SHARPEN = v; }, set repair(v) { REPAIR = v; } };
+  return { process, simulate, FT, set sharpen(v) { SHARPEN = v; }, set repair(v) { REPAIR = v; }, set flightDrop(v) { FLIGHT_DROP = v; }, set flightLag(v) { FLIGHT_LAG = v; } };
 })();
 // ===== ENGINE END =====

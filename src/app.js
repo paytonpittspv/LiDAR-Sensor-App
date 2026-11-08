@@ -19,19 +19,22 @@ const DB = {
   set(k, v) { try { localStorage.setItem("pls." + k, JSON.stringify(v)); return true; } catch (e) { toast("Couldn't save: this phone's storage is full. Export a backup in Settings, then clear old runs."); return false; } },
 };
 let athletes = DB.get("athletes", []);
-let runs = DB.get("runs", []);
+let runs = DB.get("runs", []).map((r) => (r.setup === "polerun" ? Object.assign(r, { setup: "polerun100" }) : r));
 let settings = Object.assign({ midOut: 4, voice: false, chime: "original", solo: false, theme: null, weightUnit: "lb", lastAthlete: null, lastMode: "sprint", lastTarget: 30, lastSetup: "runway100" }, DB.get("settings", {}));
 const saveAthletes = () => DB.set("athletes", athletes);
 const saveRuns = () => DB.set("runs", runs);
 const saveSettings = () => DB.set("settings", settings);
 if (settings.theme) document.documentElement.setAttribute("data-theme", settings.theme);
+if (settings.lastSetup === "polerun") settings.lastSetup = "polerun100";
 const athleteById = (id) => athletes.find((a) => a.id === id) || { id, name: "Unknown athlete" };
 
 // ---------------- tests ----------------
 const SETUPS = {
   runway100: { name: "Runway · short approach", short: "Short approach", detail: "Tripod 100 ft from the back of the box", boxFt: 100 },
   runway150: { name: "Runway · long approach", short: "Long approach", detail: "Tripod 150 ft from the back of the box", boxFt: 150 },
-  polerun: { name: "Pole run · off the runway", short: "Pole run", detail: "Anywhere on the track, tripod behind the start" },
+  polerun100: { name: "Pole run · short approach", short: "Pole run 100", detail: "Off the runway · tripod 100 ft from the box mark", boxFt: 100, pole: true },
+  polerun150: { name: "Pole run · long approach", short: "Pole run 150", detail: "Off the runway · tripod 150 ft from the box mark", boxFt: 150, pole: true },
+  polerun: { name: "Pole run", short: "Pole run", detail: "Off the runway", boxFt: 100, pole: true, old: true },   // runs saved before 100/150 ft pole runs
 };
 const testKey = (r) => (r.mode === "sprint" ? `sprint-${r.target}` : `vault-${r.setup}`);
 const testName = (key) => { const [m, x] = key.split("-"); return m === "sprint" ? `${x} m sprint` : SETUPS[x].name; };
@@ -190,7 +193,6 @@ function keepRun(run) {
 // how the sensor decides someone is ready, for this test
 function armRule() {
   if (cap.mode === "sprint") return { stop: Math.round((cap.target + 1.5) * 100), gate: 500, hold: 1500, max: 9900, text: "Stand still within 5 m of the sensor for 1.5 s" };
-  if (cap.setup === "polerun") return { stop: 0, gate: 0, hold: 2000, max: 9900, text: "Stand still on your start mark for 2 s" };
   const box = Math.round(SETUPS[cap.setup].boxFt * FT * 100);
   return { stop: 0, gate: box - 1220, hold: 2000, max: box, text: "Stand still on your start mark for 2 s" };
 }
@@ -244,7 +246,7 @@ function liveAdd(pts) {
   }
   liveDraw();
 }
-function liveSpan() { return cap.mode === "sprint" ? cap.target : cap.setup === "polerun" ? 40 : Math.round(SETUPS[cap.setup].boxFt * FT - (cap.live && cap.live.d0 || 0)); }
+function liveSpan() { return cap.mode === "sprint" ? cap.target : Math.round(SETUPS[cap.setup].boxFt * FT - (cap.live && cap.live.d0 || 0)); }
 function liveDraw() {
   const L = cap.live, el = $("#liveBox"); if (!L || !el) return;
   const x = L.pts.length ? L.pts[L.pts.length - 1][0] : 0;
@@ -308,10 +310,11 @@ function simulateRun() {
   if (cap.mode === "sprint") raw = Engine.simulate({ seed, vmax, target: cap.target, back: 3 }).raw;
   else {
     const steps = 14 + Math.floor(Math.random() * 5);
-    raw = Engine.simulate({ seed, vmax, steps, hop: Math.random() < 0.3, back: 3, finish: (Math.random() - 0.5) * 0.8 }).raw;
-    if (cap.setup !== "polerun") {
+    const pole = SETUPS[cap.setup].pole;
+    raw = Engine.simulate({ seed, vmax, steps, hop: Math.random() < 0.3, back: 3, finish: (Math.random() - 0.5) * 0.8, popup: pole, flight: 0.5 + Math.random() * 0.2 }).raw;
+    {
       // shift so the takeoff lands a realistic distance from the box
-      const box = SETUPS[cap.setup].boxFt * FT, probe = Engine.process(raw, { mode: "vault", setup: "polerun" });
+      const box = SETUPS[cap.setup].boxFt * FT, probe = Engine.process(raw, { mode: "vault", setup: cap.setup, noBox: true });
       if (!probe.error) { const shift = Math.round((box - (11 + Math.random() * 3) * FT - 0.5 - probe.takeoff.sensor) * 100); raw.d = raw.d.map((cm) => (cm > 0 ? Math.max(1, cm + shift) : cm)); }
     }
   }
@@ -488,7 +491,7 @@ function contactsOf(r) {
     return { t, left, takeoff: fromEnd === 0, out: left ? fromEnd / 2 : null, n: left ? R.steps.lefts - fromEnd / 2 : null,
       boxFt: box ? (box - (cv.d[k] + R.start.d + lead)) / FT : null, startFt: (cv.d[k] + lead) / FT, v: cv.v[k] }; });
 }
-const hasBox = (r) => r.setup !== "polerun";
+const hasBox = (r) => r.mode === "vault";
 const spotFt = (r, c) => (hasBox(r) ? c.boxFt : c.startFt);
 const outLabel = (o) => (o === 0 ? "Takeoff" : `${o} out`);
 // into the box: speed change over the last half second before the plant
@@ -817,7 +820,14 @@ function newHTML() {
         <span class="row" style="gap:6px"><input type="number" id="customTarget" inputmode="numeric" min="5" max="80" placeholder="Other" style="width:90px" value="${[10, 20, 30, 40, 60].includes(cap.target) ? "" : cap.target}"><span class="muted">m</span></span></div>
         <div class="card" style="margin-top:14px"><div class="small muted">Recording starts by itself when the athlete moves and stops at the distance you set. The clock starts once movement is confirmed (speed passes 0.2 m/s), so a small rock or lean before the start doesn't count.</div></div>`;
     } else {
-      h += `<div class="label" style="margin:18px 0 8px">Setup</div>${Object.entries(SETUPS).map(([k, s]) => `<button class="opt" data-act="cap-setup" data-v="${k}" aria-pressed="${cap.setup === k}"><b>${s.name}</b><span>${s.detail}</span></button>`).join("")}`;
+      const pole = !!SETUPS[cap.setup].pole, far = SETUPS[cap.setup].boxFt === 150;
+      const pick = (p, f) => (p ? "polerun" : "runway") + (f ? "150" : "100");
+      h += `<div class="label" style="margin:18px 0 8px">Where</div><div class="grid2">
+          <button class="opt" data-act="cap-setup" data-v="${pick(false, far)}" aria-pressed="${!pole}"><b>On the runway</b><span>Jumping into the box</span></button>
+          <button class="opt" data-act="cap-setup" data-v="${pick(true, far)}" aria-pressed="${pole}"><b>Off the runway</b><span>Pole runs, no box</span></button></div>
+        <div class="label" style="margin:14px 0 8px">Tripod distance</div><div class="grid2">
+          <button class="opt" data-act="cap-setup" data-v="${pick(pole, false)}" aria-pressed="${!far}"><b>100 ft</b><span>Short approach</span></button>
+          <button class="opt" data-act="cap-setup" data-v="${pick(pole, true)}" aria-pressed="${far}"><b>150 ft</b><span>Long approach</span></button></div>`;
       h += setupGuide(cap.setup);
     }
     h += `<div class="card" style="margin-top:6px"><b>Ready chime</b><div class="small muted">Plays every time an athlete has stood in long enough and the sensor is armed. Turn the phone volume up: it plays with the silent switch on and through a Bluetooth speaker.</div>
@@ -866,11 +876,14 @@ function newHTML() {
   return h;
 }
 function setupGuide(setup) {
-  if (setup === "polerun") return `<div class="card howto"><div class="label">Pole runs</div><ol>
-    <li>Set the tripod behind the start on the track, in the lane the athlete will run.</li>
-    <li>Aim straight down the lane at about lower-back height.</li>
-    <li>The run is measured until the athlete slows down. Lefts are counted back from the last step before slowing.</li></ol></div>`;
   const ft = SETUPS[setup].boxFt, m = (ft * FT).toFixed(2);
+  if (SETUPS[setup].pole) return `<div class="card howto"><div class="label">Pole runs · same setup every time · ${ft} ft</div><ol>
+    <li>Pick where the box would be and put a <b>cone</b> there: the <b>box mark</b>. Everything is measured from it, just like the box on the runway.</li>
+    <li>Run a tape from the cone straight back up the lane to <b>${ft} ft</b> and stand the tripod so the sensor window is right over that mark.</li>
+    <li>Aim straight down the lane at the cone, at about lower-back height.</li>
+    <li><b>Check it:</b> stand at the cone. The live distance should read about <b>${m} m</b>. Here: <b data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</b> m.</li>
+    <li>Take off where you would on the runway. There's no box to hit, so the takeoff is found from the moment your feet leave the ground (the steps stop and speed drops at the pop-up), then the lefts are counted back from there.</li></ol>
+    <div class="small muted">Start marks, lefts and the takeoff are in feet from the box mark, exactly like runway jumps, so the two compare directly.</div></div>`;
   return `<div class="card howto"><div class="label">Same setup every time · ${ft} ft</div><ol>
     <li>Run a tape from the <b>back of the box</b> straight up the middle of the runway to <b>${ft} ft</b>. Mark it with tape so it's there next time.</li>
     <li>Stand the tripod so the <b>front of the case</b> (the sensor window) is right over that mark.</li>
@@ -971,7 +984,7 @@ function sprintProfileCard(mine, tr) {
 function vaultProfileCard(tr) {
   const ok = tr.filter((r) => r.res.last5);
   if (!ok.length) return "";
-  const setup = anState.test.split("-")[1], hasBox = setup !== "polerun";
+  const setup = anState.test.split("-")[1], hasBox = true;
   const L5 = ok.map((r) => r.res.last5.speed), lefts = ok.map((r) => r.res.steps.lefts).filter(Boolean);
   const TO = ok.map((r) => r.res.takeoff.outFt).filter((x) => x != null), SM = ok.map((r) => r.res.startMarkFt).filter((x) => x != null);
   const sTop = sprintTopFor(anState.athleteId);
@@ -992,7 +1005,7 @@ function vaultProfileCard(tr) {
     h += `<div class="label" style="margin:14px 0 6px">Where the lefts land · last ${lj.length} jump${lj.length > 1 ? "s" : ""}</div>
       ${runwayMap(lj.map((r) => ({ run: r, label: `${dayLabel(dayKey(r.ts))} ${timeLabel(r.ts)}` })), { mid })}
       <div class="between" style="margin:8px 0 4px;gap:8px;flex-wrap:wrap"><span class="small muted">Mid mark at</span><div class="chips">${[2, 3, 4, 5, 6].map((k) => `<button class="chip sm" data-act="mid-out" data-v="${k}" aria-pressed="${k === mid}">${k} lefts out</button>`).join("")}</div></div>
-      <div class="midbox"><div><div class="small muted">Mid mark · ${mid} lefts out from takeoff</div><div class="big2">${midTxt}</div></div><div class="small muted" style="text-align:right">${setup !== "polerun" ? "from the box" : "from the start"}<br>${col.length} jump${col.length === 1 ? "" : "s"}</div></div>
+      <div class="midbox"><div><div class="small muted">Mid mark · ${mid} lefts out from takeoff</div><div class="big2">${midTxt}</div></div><div class="small muted" style="text-align:right">${SETUPS[setup].pole ? "from the box mark" : "from the box"}<br>${col.length} jump${col.length === 1 ? "" : "s"}</div></div>
       ${leftsMatrix(lj, { stats: true, mid, rowLabel: (r) => `${dayLabel(dayKey(r.ts))} ${timeLabel(r.ts)}` })}
       <div class="small muted" style="margin-top:4px">Each column is a left counted back from the takeoff. A small spread means that left lands in the same spot every jump. If the takeoff column moves but the mid mark doesn't, the change is in the last steps.</div>`;
   }
@@ -1251,13 +1264,13 @@ function addDemoData() {
         const s = Engine.simulate({ seed: Math.floor(Math.random() * 1e6) + 1, vmax, target: 30, back: 3 });
         const res = Engine.process(s.raw, { mode: "sprint", target: 30, mass: a.kg });
         if (!res.error) runs.push({ id: uid(), ts, athleteId: a.id, mode: "sprint", target: 30, res });
-        const setup = ["runway100", "runway150", "polerun"][(day / 3 + rep) % 3 | 0];
+        const setup = ["runway100", "runway150", "polerun100"][(day / 3 + rep) % 3 | 0];
         const steps = setup === "runway150" ? 19 + (rep % 2) : 15 + (rep % 2);
         const carry = 0.55 + (name.endsWith("2") ? 0.25 : 0) + Math.random() * 0.2;
-        const sv = Engine.simulate({ seed: Math.floor(Math.random() * 1e6) + 1, vmax: vmax - carry, steps, back: 2.5 });
+        const sv = Engine.simulate({ seed: Math.floor(Math.random() * 1e6) + 1, vmax: vmax - carry, steps, back: 2.5, popup: !!SETUPS[setup].pole, flight: 0.55 });
         const ctx = { mode: "vault", setup, mass: a.kg };
-        if (setup !== "polerun") {
-          const probe = Engine.process(sv.raw, ctx), box = SETUPS[setup].boxFt * FT;
+        {
+          const probe = Engine.process(sv.raw, Object.assign({ noBox: true }, ctx)), box = SETUPS[setup].boxFt * FT;
           if (!probe.error) { const shift = Math.round((box - (11 + Math.random() * 2.5) * FT - 0.5 - probe.takeoff.sensor) * 100); sv.raw.d = sv.raw.d.map((cm) => (cm > 0 ? Math.max(1, cm + shift) : cm)); }
         }
         const rv = Engine.process(sv.raw, ctx);

@@ -18,10 +18,23 @@ let lok=0,ln=0,eTo=[],eL5=[];
 for(const hop of [false,true]) for(let s=1;s<=20;s++){
   const steps=12+(s%9), vmax=8.2+((s*13)%10)/10;
   const sim=Engine.simulate({seed:s*31+(hop?7:1),vmax,steps,hop,back:2.4,noise:0.03});
-  const r=Engine.process(sim.raw,{mode:'vault',setup:'polerun'}); if(r.error){console.log('ERR',r.error);continue;}
+  const r=Engine.process(sim.raw,{mode:'vault',setup:'runway100',noBox:true}); if(r.error){console.log('ERR',r.error);continue;}
   const trueLefts=Math.ceil((steps-1)/2); ln++; if(r.steps.lefts===trueLefts) lok++; else console.log(`  miss hop=${hop} s${s}: steps ${steps} counted ${r.steps.counted} (first at ${r.steps.firstAt} m) lefts ${r.steps.lefts} vs ${trueLefts}`);
   const T=sim.truth, xTo=T.xAt(T.vaultEnd);
   eTo.push(r.takeoff.sensor-(2.4+xTo));
   const tl=5/(T.atX(xTo)-T.atX(xTo-5)); if(r.last5) eL5.push(r.last5.speed-tl);
 }
 console.log(`lefts correct ${lok}/${ln}`); console.log('takeoff position err (m)',st(eTo)); console.log('last 5 m speed err',st(eL5));
+
+// ---- pole runs off the runway: takeoff found where the feet leave the ground ----
+let pok=0,pn=0,plok=0,eP=[];
+for(let s=1;s<=40;s++){
+  const steps=12+(s%7), vmax=8.0+((s*13)%10)/10;
+  const sim=Engine.simulate({seed:s*71+5,vmax,steps,hop:s%3==0,back:2.5,noise:0.03,popup:true,toLoss:0.06+(s%5)*0.02,flight:0.45+(s%4)*0.08});
+  const r=Engine.process(sim.raw,{mode:'vault',setup:'polerun100',noBox:true}); pn++; if(r.error){console.log('ERR',r.error);continue;}
+  const T=sim.truth, last=r.contacts[r.contacts.length-1].t+r.start.t;
+  if(Math.abs(last-T.vaultEnd)<0.08) pok++; if(r.steps.lefts===Math.ceil((steps-1)/2)) plok++;
+  eP.push(r.takeoff.sensor-(2.5+T.xAt(T.vaultEnd)));
+}
+console.log(`pole run takeoff found ${pok}/${pn}, lefts correct ${plok}/${pn}`); console.log('pole run takeoff position err (m)',st(eP));
+if (pok < 0.9 * pn) { console.error('pole run takeoff detection below 90%'); process.exit(1); }
