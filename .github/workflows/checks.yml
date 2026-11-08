@@ -1,0 +1,38 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    name: Firmware compiles for the ESP32
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install the ESP32 board package
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.0.7
+      - name: Compile (ESP32 Dev Module, Huge APP partition)
+        run: arduino-cli compile --fqbn "esp32:esp32:esp32:PartitionScheme=huge_app" --warnings default firmware/SpeedLidar
+
+  app:
+    name: App builds and passes the accuracy tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Rebuild and make sure index.html and page.h are up to date
+        run: |
+          python3 src/build.py
+          git diff --exit-code -- index.html firmware/SpeedLidar/page.h || (echo "::error::Run python3 src/build.py and commit the result" && exit 1)
+      - name: Accuracy tests on simulated runs
+        working-directory: src
+        run: node test_engine.js
