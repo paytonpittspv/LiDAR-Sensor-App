@@ -762,7 +762,7 @@ const DB = {
 };
 let athletes = DB.get("athletes", []);
 let runs = DB.get("runs", []);
-let settings = Object.assign({ midOut: 4, voice: false, chime: "bell", solo: false, theme: null, weightUnit: "lb", lastAthlete: null, lastMode: "sprint", lastTarget: 30, lastSetup: "runway100" }, DB.get("settings", {}));
+let settings = Object.assign({ midOut: 4, voice: false, chime: "original", solo: false, theme: null, weightUnit: "lb", lastAthlete: null, lastMode: "sprint", lastTarget: 30, lastSetup: "runway100" }, DB.get("settings", {}));
 const saveAthletes = () => DB.set("athletes", athletes);
 const saveRuns = () => DB.set("runs", runs);
 const saveSettings = () => DB.set("settings", settings);
@@ -849,38 +849,28 @@ function pollLoop() {
 // (iPhones mute Web Audio with the silent switch; an audio clip plays like music, so it still sounds
 // with the switch on and goes out over a Bluetooth speaker.)
 const CHIMES = {
-  // bell: three rising bell notes (B5 · E6 · G#6) with a soft room tail
-  bell: { notes: [[987.77, 0], [1318.51, 0.12], [1661.22, 0.24]], partials: [[1, 1, 1.4], [2.76, 0.32, 0.55], [5.4, 0.12, 0.25], [8.93, 0.05, 0.12]], dur: 2.0 },
-  // soft: lower, rounder two-note "ding-dong" chime
-  soft: { notes: [[783.99, 0], [1046.5, 0.2]], partials: [[1, 1, 1.6], [2, 0.18, 0.7], [3, 0.06, 0.3]], dur: 2.0 },
+  // the original ready chime: E5 · A5 · E6, sine with a little second harmonic, 15 ms rise, exponential fade
+  original: { dur: 1.5, tones: [[659.25, 0, 0.32, 0.55], [880, 0.13, 0.32, 0.55], [1318.5, 0.26, 0.32, 1.1], [1318.5, 0, 0.06, 0.55, 1], [1760, 0.13, 0.06, 0.55, 1], [2637, 0.26, 0.06, 1.1, 1]] },
+  // GateCamLive's finish beeps: 880 Hz, then 1320 Hz 0.13 s later
+  gatecam: { dur: 0.5, beeps: [[880, 0, 0.09], [1320, 0.13, 0.14]] },
 };
 function renderChime(kind) {
-  const C = CHIMES[kind] || CHIMES.bell, sr = 44100, n = Math.floor(sr * C.dur), dry = new Float32Array(n);
-  for (const [f0, t0] of C.notes) {
-    const s0 = Math.floor(t0 * sr);
-    for (const [ratio, amp, decay] of C.partials) for (const det of [-1.2, 1.2]) {   // two slightly detuned voices = shimmer
-      const w = 2 * Math.PI * (f0 * ratio + det) / sr;
-      for (let i = s0; i < n; i++) {
-        const t = (i - s0) / sr, env = Math.min(1, t / 0.003) * Math.exp(-t / decay);
-        if (env < 1e-4 && t > 0.01) break;
-        dry[i] += 0.5 * amp * env * Math.sin(w * (i - s0));
-      }
+  const C = CHIMES[kind] || CHIMES.original, sr = 44100, n = Math.floor(sr * C.dur), out = new Float32Array(n);
+  // exponential rise 0.0001 → peak over 15 ms, then exponential fall to 0.0001 at `len` (same shape as before)
+  for (const [f, t0, peak, len] of C.tones || []) {
+    const w = 2 * Math.PI * f / sr, s0 = Math.floor(t0 * sr), a = 0.015, e = Math.min(n, s0 + Math.floor(len * sr));
+    for (let i = s0; i < e; i++) {
+      const t = (i - s0) / sr, env = t < a ? 1e-4 * Math.pow(peak / 1e-4, t / a) : peak * Math.pow(1e-4 / peak, (t - a) / (len - a));
+      out[i] += env * Math.sin(w * (i - s0));
     }
   }
-  // small room: four comb filters into two all-passes (Schroeder), mixed in gently
-  const wet = new Float32Array(n);
-  for (const [d, g] of [[1557, 0.78], [1617, 0.77], [1491, 0.79], [1422, 0.8]]) {
-    const buf = new Float32Array(d); let k = 0;
-    for (let i = 0; i < n; i++) { const y = buf[k]; buf[k] = dry[i] + y * g; k = (k + 1) % d; wet[i] += y * 0.25; }
+  // plain beeps with 5 ms edges so they don't click
+  for (const [f, t0, len] of C.beeps || []) {
+    const w = 2 * Math.PI * f / sr, s0 = Math.floor(t0 * sr), m = Math.floor(len * sr), edge = Math.floor(0.005 * sr);
+    for (let k = 0; k < m && s0 + k < n; k++) out[s0 + k] += 0.3 * Math.min(1, k / edge, (m - k) / edge) * Math.sin(w * k);
   }
-  for (const [d, g] of [[225, 0.5], [556, 0.5]]) {
-    const buf = new Float32Array(d); let k = 0;
-    for (let i = 0; i < n; i++) { const b = buf[k], y = -wet[i] + b; buf[k] = wet[i] + b * g; k = (k + 1) % d; wet[i] = y; }
-  }
-  const out = new Float32Array(n); let peak = 0;
-  for (let i = 0; i < n; i++) { out[i] = dry[i] + 0.22 * wet[i]; peak = Math.max(peak, Math.abs(out[i])); }
-  const fade = Math.floor(0.25 * sr);
-  for (let i = 0; i < n; i++) { out[i] *= 0.9 / peak; if (i > n - fade) out[i] *= (n - i) / fade; }
+  let peak = 0; for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(out[i]));
+  for (let i = 0; i < n; i++) out[i] *= 0.9 / peak;
   // 16-bit mono WAV
   const bytes = new DataView(new ArrayBuffer(44 + n * 2)), str = (o, s) => { for (let i = 0; i < s.length; i++) bytes.setUint8(o + i, s.charCodeAt(i)); };
   str(0, "RIFF"); bytes.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt "); bytes.setUint32(16, 16, true); bytes.setUint16(20, 1, true); bytes.setUint16(22, 1, true);
@@ -890,7 +880,7 @@ function renderChime(kind) {
 }
 const chimeEls = {};
 function chimeEl() {
-  const kind = settings.chime || "bell";
+  const kind = CHIMES[settings.chime] ? settings.chime : "original";
   if (!chimeEls[kind]) { const el = new Audio(renderChime(kind)); el.preload = "auto"; chimeEls[kind] = el; }
   return chimeEls[kind];
 }
@@ -1573,7 +1563,7 @@ function newHTML() {
       h += setupGuide(cap.setup);
     }
     h += `<div class="card" style="margin-top:6px"><b>Ready chime</b><div class="small muted">Plays every time an athlete has stood in long enough and the sensor is armed. Turn the phone volume up: it plays with the silent switch on and through a Bluetooth speaker.</div>
-      <div class="between" style="margin-top:10px;gap:8px;flex-wrap:wrap"><div class="chips">${[["bell", "Bell"], ["soft", "Soft"]].map(([k, l]) => `<button class="chip sm" data-act="chime-kind" data-v="${k}" aria-pressed="${(settings.chime || "bell") === k}">${l}</button>`).join("")}</div><button class="btn sm" data-act="chime-test">▶ Play chime</button></div></div>
+      <div class="between" style="margin-top:10px;gap:8px;flex-wrap:wrap"><div class="chips">${[["original", "Original"], ["gatecam", "GateCamLive"]].map(([k, l]) => `<button class="chip sm" data-act="chime-kind" data-v="${k}" aria-pressed="${(CHIMES[settings.chime] ? settings.chime : "original") === k}">${l}</button>`).join("")}</div><button class="btn sm" data-act="chime-test">▶ Play chime</button></div></div>
     ${voiceCard()}
     <div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Saves every run and gets ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>`;
     const q = cap.queue;
