@@ -847,26 +847,85 @@ function pollLoop() {
   if (WEB_COPY) { const p = $("#conn"); p.className = "pill off"; p.textContent = "Practice"; return; } poll().finally(() => setTimeout(pollLoop, view === "new" && ["waiting", "ready", "recording"].includes(cap.phase) ? 120 : 250)); }
 
 // ---------------- sounds ----------------
-// a soft three-note chime when the sensor is armed (Web Audio, no files needed)
-let actx = null;
-function unlockAudio() { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume(); } catch (e) {} voiceUnlocked = true; }
-function chime() {
-  if (!actx) return;
-  const t = actx.currentTime;
-  [[659.25, 0], [880, 0.13], [1318.5, 0.26]].forEach(([f, dt]) => {
-    for (const [mult, vol] of [[1, 0.32], [2, 0.06]]) {
-      const o = actx.createOscillator(), g = actx.createGain();
-      o.type = "sine"; o.frequency.value = f * mult;
-      g.gain.setValueAtTime(0.0001, t + dt); g.gain.exponentialRampToValueAtTime(vol, t + dt + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + dt + (dt > 0.2 ? 1.1 : 0.55));
-      o.connect(g).connect(actx.destination); o.start(t + dt); o.stop(t + dt + 1.2);
+// The ready chime is synthesised once into a WAV clip and played with an <audio> element.
+// (iPhones mute Web Audio with the silent switch; an audio clip plays like music, so it still sounds
+// with the switch on and goes out over a Bluetooth speaker.)
+const CHIMES = {
+  // bell: three rising bell notes (B5 · E6 · G#6) with a soft room tail
+  bell: { notes: [[987.77, 0], [1318.51, 0.12], [1661.22, 0.24]], partials: [[1, 1, 1.4], [2.76, 0.32, 0.55], [5.4, 0.12, 0.25], [8.93, 0.05, 0.12]], dur: 2.0 },
+  // soft: lower, rounder two-note "ding-dong" chime
+  soft: { notes: [[783.99, 0], [1046.5, 0.2]], partials: [[1, 1, 1.6], [2, 0.18, 0.7], [3, 0.06, 0.3]], dur: 2.0 },
+};
+function renderChime(kind) {
+  const C = CHIMES[kind] || CHIMES.bell, sr = 44100, n = Math.floor(sr * C.dur), dry = new Float32Array(n);
+  for (const [f0, t0] of C.notes) {
+    const s0 = Math.floor(t0 * sr);
+    for (const [ratio, amp, decay] of C.partials) for (const det of [-1.2, 1.2]) {   // two slightly detuned voices = shimmer
+      const w = 2 * Math.PI * (f0 * ratio + det) / sr;
+      for (let i = s0; i < n; i++) {
+        const t = (i - s0) / sr, env = Math.min(1, t / 0.003) * Math.exp(-t / decay);
+        if (env < 1e-4 && t > 0.01) break;
+        dry[i] += 0.5 * amp * env * Math.sin(w * (i - s0));
+      }
     }
-  });
+  }
+  // small room: four comb filters into two all-passes (Schroeder), mixed in gently
+  const wet = new Float32Array(n);
+  for (const [d, g] of [[1557, 0.78], [1617, 0.77], [1491, 0.79], [1422, 0.8]]) {
+    const buf = new Float32Array(d); let k = 0;
+    for (let i = 0; i < n; i++) { const y = buf[k]; buf[k] = dry[i] + y * g; k = (k + 1) % d; wet[i] += y * 0.25; }
+  }
+  for (const [d, g] of [[225, 0.5], [556, 0.5]]) {
+    const buf = new Float32Array(d); let k = 0;
+    for (let i = 0; i < n; i++) { const b = buf[k], y = -wet[i] + b; buf[k] = wet[i] + b * g; k = (k + 1) % d; wet[i] = y; }
+  }
+  const out = new Float32Array(n); let peak = 0;
+  for (let i = 0; i < n; i++) { out[i] = dry[i] + 0.22 * wet[i]; peak = Math.max(peak, Math.abs(out[i])); }
+  const fade = Math.floor(0.25 * sr);
+  for (let i = 0; i < n; i++) { out[i] *= 0.9 / peak; if (i > n - fade) out[i] *= (n - i) / fade; }
+  // 16-bit mono WAV
+  const bytes = new DataView(new ArrayBuffer(44 + n * 2)), str = (o, s) => { for (let i = 0; i < s.length; i++) bytes.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); bytes.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt "); bytes.setUint32(16, 16, true); bytes.setUint16(20, 1, true); bytes.setUint16(22, 1, true);
+  bytes.setUint32(24, sr, true); bytes.setUint32(28, sr * 2, true); bytes.setUint16(32, 2, true); bytes.setUint16(34, 16, true); str(36, "data"); bytes.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) bytes.setInt16(44 + i * 2, Math.max(-1, Math.min(1, out[i])) * 32767, true);
+  return URL.createObjectURL(new Blob([bytes.buffer], { type: "audio/wav" }));
+}
+const chimeEls = {};
+function chimeEl() {
+  const kind = settings.chime || "bell";
+  if (!chimeEls[kind]) { const el = new Audio(renderChime(kind)); el.preload = "auto"; chimeEls[kind] = el; }
+  return chimeEls[kind];
+}
+let wakeLock = null;
+// called on a tap: lets the page play the chime later without a tap, and keeps the screen on where allowed
+function unlockAudio() {
+  voiceUnlocked = true;
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+  try {
+    const el = chimeEl();
+    if (!el._unlocked) {
+      el.muted = true; el._want = false;
+      const p = el.play();
+      if (p) p.then(() => { if (!el._want) { el.pause(); el.currentTime = 0; } el.muted = false; el._unlocked = true; }).catch(() => { el.muted = false; });
+    }
+  } catch (e) {}
+  try { if (!wakeLock && navigator.wakeLock) navigator.wakeLock.request("screen").then((w) => { wakeLock = w; w.addEventListener("release", () => (wakeLock = null)); }).catch(() => {}); } catch (e) {}
+}
+function chime() {
+  try {
+    const el = chimeEl(); el._want = true; el.muted = false; el.volume = 1;
+    el.currentTime = 0;
+    const p = el.play(); if (p) p.catch(() => toast("Tap the screen once so the phone allows the chime."));
+  } catch (e) {}
 }
 function readySignal() {
   const s = settings.readySound || "chime";
   if (s === "chime" || s === "both") chime();
-  if (s === "voice" || s === "both") setTimeout(() => say(cap.queue.length > 1 ? `${firstName(cap.athleteId)}, ready` : "Ready"), s === "both" ? 650 : 0);
+  if (s === "voice" || s === "both") setTimeout(() => say(cap.queue.length > 1 ? `${firstName(cap.athleteId)}, ready` : "Ready"), s === "both" ? 1100 : 0);
+  if (navigator.vibrate) try { navigator.vibrate([60, 40, 60]); } catch (e) {}
 }
+// the screen lock releases the wake lock; ask again when the app comes back
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && voiceUnlocked) unlockAudio(); });
 
 // ---------------- capture flow ----------------
 // phase: setup → waiting (athlete steps in) → ready (armed, chime) → recording (live) → processing → review / waiting again
@@ -1514,7 +1573,9 @@ function newHTML() {
       h += setupGuide(cap.setup);
     }
     h += `<div class="card" style="margin-top:6px"><div class="between"><div><b>Ready signal</b><div class="small muted">Plays when an athlete has stood in long enough and the sensor is armed.</div></div></div>
-      <div class="chips" style="margin-top:8px">${[["chime", "Chime"], ["voice", "Voice"], ["both", "Both"]].map(([k, l]) => `<button class="chip" data-act="ready-sound" data-v="${k}" aria-pressed="${(settings.readySound || "chime") === k}">${l}</button>`).join("")}</div></div>
+      <div class="chips" style="margin-top:8px">${[["chime", "Chime"], ["voice", "Voice"], ["both", "Both"]].map(([k, l]) => `<button class="chip" data-act="ready-sound" data-v="${k}" aria-pressed="${(settings.readySound || "chime") === k}">${l}</button>`).join("")}</div>
+      ${(settings.readySound || "chime") !== "voice" ? `<div class="between" style="margin-top:10px;gap:8px;flex-wrap:wrap"><div class="chips">${[["bell", "Bell"], ["soft", "Soft"]].map(([k, l]) => `<button class="chip sm" data-act="chime-kind" data-v="${k}" aria-pressed="${(settings.chime || "bell") === k}">${l}</button>`).join("")}</div><button class="btn sm" data-act="chime-test">▶ Play chime</button></div>` : ""}
+      <div class="small muted" style="margin-top:8px">Turn the phone volume up. It plays with the silent switch on, and through a Bluetooth speaker.</div></div>
     <div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Saves every run, says the result on the Bluetooth speaker, and gets ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>`;
     const q = cap.queue;
     h += `<button class="btn big primary" data-act="cap-ready" ${q.length ? "" : "disabled"}>${!q.length ? "Pick who's running" : q.length === 1 ? `Get ready · ${esc(athleteById(q[0]).name)}` : `Start · ${q.length} athletes taking turns`}</button>`;
@@ -1881,7 +1942,9 @@ document.addEventListener("click", (e) => {
     case "cap-sim-in": toReady(); break;
     case "cap-armnow": if (sensor.connected) arm(true); else toReady(); break;
     case "cap-rewait": arm(); break;
-    case "ready-sound": settings.readySound = v; saveSettings(); if (v !== "voice") { unlockAudio(); chime(); } if (v !== "chime") say("Ready"); render(); break;
+    case "ready-sound": settings.readySound = v; saveSettings(); unlockAudio(); if (v !== "voice") chime(); if (v === "voice") say("Ready"); render(); break;
+    case "chime-kind": settings.chime = v; saveSettings(); unlockAudio(); chime(); render(); break;
+    case "chime-test": unlockAudio(); chime(); break;
     case "cap-save": keepRun(cap.run); cap.lastRun = cap.run; cap.lastSaved = true; toast("Saved"); arm(); break;
     case "cap-discard": toast("Thrown away"); arm(); break;
     case "cap-again": arm(); break;
