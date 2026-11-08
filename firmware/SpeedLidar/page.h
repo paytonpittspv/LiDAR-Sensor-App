@@ -765,7 +765,7 @@ const DB = {
 };
 let athletes = DB.get("athletes", []);
 let runs = DB.get("runs", []);
-let settings = Object.assign({ midOut: 4, readySound: "chime", solo: false, theme: null, weightUnit: "lb", lastAthlete: null, lastMode: "sprint", lastTarget: 30, lastSetup: "runway100" }, DB.get("settings", {}));
+let settings = Object.assign({ midOut: 4, voice: false, chime: "bell", solo: false, theme: null, weightUnit: "lb", lastAthlete: null, lastMode: "sprint", lastTarget: 30, lastSetup: "runway100" }, DB.get("settings", {}));
 const saveAthletes = () => DB.set("athletes", athletes);
 const saveRuns = () => DB.set("runs", runs);
 const saveSettings = () => DB.set("settings", settings);
@@ -799,7 +799,8 @@ function toast(msg) {
 
 // ---------------- voice ----------------
 let voiceUnlocked = false;
-function say(txt) {
+function say(txt, force) {
+  if (!settings.voice && !force) return;
   if (!("speechSynthesis" in window)) return;
   try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(txt); u.rate = 1.0; u.volume = 1; speechSynthesis.speak(u); } catch (e) {}
 }
@@ -919,9 +920,8 @@ function chime() {
   } catch (e) {}
 }
 function readySignal() {
-  const s = settings.readySound || "chime";
-  if (s === "chime" || s === "both") chime();
-  if (s === "voice" || s === "both") setTimeout(() => say(cap.queue.length > 1 ? `${firstName(cap.athleteId)}, ready` : "Ready"), s === "both" ? 1100 : 0);
+  chime();
+  setTimeout(() => say(cap.queue.length > 1 ? `${firstName(cap.athleteId)}, ready` : "Ready"), 1100);
   if (navigator.vibrate) try { navigator.vibrate([60, 40, 60]); } catch (e) {}
 }
 // the screen lock releases the wake lock; ask again when the app comes back
@@ -1054,7 +1054,7 @@ function finishCapture(raw) {
     say((cap.queue.length > 1 ? `${firstName(run.athleteId)}. ` : "") + speech(run) + (cap.queue.length > 1 ? ` Next up, ${firstName(cap.athleteId)}.` : ""));
     // results stay on screen until the next athlete steps in and the sensor arms
     cap.lastRun = run; cap.lastSaved = true; arm();
-  } else { cap.run = run; cap.phase = "review"; render(); }
+  } else { cap.run = run; cap.phase = "review"; say(speech(run)); render(); }
 }
 // no sensor: play a simulated run through the same live view, in real time
 function simulateRun() {
@@ -1445,6 +1445,9 @@ function go(v, arg) {
   if (v === "new" && cap.phase !== "recording" && cap.phase !== "processing" && cap.phase !== "summary") { if (cap.phase === "ready") stopNow(); cap.phase = "setup"; cap.error = null; }
   render(); window.scrollTo(0, 0);
 }
+function voiceCard() {
+  return `<div class="card between" style="margin-top:6px"><div><b>Voice</b><div class="small muted">Says "${cap.queue.length > 1 ? "Name, ready" : "Ready"}" after the chime and reads every result aloud. Off: chime only.</div></div><label class="switch"><input type="checkbox" id="voiceSw" ${settings.voice ? "checked" : ""}><span></span></label></div>`;
+}
 function athletePicker() {
   if (!athletes.length) return `<div class="card"><div class="muted small" style="margin-bottom:8px">Add who's running first.</div><button class="btn" data-act="ath-new">Add athlete</button></div>`;
   return `<div class="chips">${athletes.map((a) => { const i = cap.queue.indexOf(a.id); return `<button class="chip" data-act="pick-ath" data-id="${a.id}" aria-pressed="${i >= 0}">${i >= 0 ? `<span class="qn">${i + 1}</span>` : ""}${esc(a.name)}</button>`; }).join("")}<button class="chip" data-act="ath-new">+ Add</button></div>
@@ -1572,11 +1575,10 @@ function newHTML() {
       h += `<div class="label" style="margin:18px 0 8px">Setup</div>${Object.entries(SETUPS).map(([k, s]) => `<button class="opt" data-act="cap-setup" data-v="${k}" aria-pressed="${cap.setup === k}"><b>${s.name}</b><span>${s.detail}</span></button>`).join("")}`;
       h += setupGuide(cap.setup);
     }
-    h += `<div class="card" style="margin-top:6px"><div class="between"><div><b>Ready signal</b><div class="small muted">Plays when an athlete has stood in long enough and the sensor is armed.</div></div></div>
-      <div class="chips" style="margin-top:8px">${[["chime", "Chime"], ["voice", "Voice"], ["both", "Both"]].map(([k, l]) => `<button class="chip" data-act="ready-sound" data-v="${k}" aria-pressed="${(settings.readySound || "chime") === k}">${l}</button>`).join("")}</div>
-      ${(settings.readySound || "chime") !== "voice" ? `<div class="between" style="margin-top:10px;gap:8px;flex-wrap:wrap"><div class="chips">${[["bell", "Bell"], ["soft", "Soft"]].map(([k, l]) => `<button class="chip sm" data-act="chime-kind" data-v="${k}" aria-pressed="${(settings.chime || "bell") === k}">${l}</button>`).join("")}</div><button class="btn sm" data-act="chime-test">▶ Play chime</button></div>` : ""}
-      <div class="small muted" style="margin-top:8px">Turn the phone volume up. It plays with the silent switch on, and through a Bluetooth speaker.</div></div>
-    <div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Saves every run, says the result on the Bluetooth speaker, and gets ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>`;
+    h += `<div class="card" style="margin-top:6px"><b>Ready chime</b><div class="small muted">Plays every time an athlete has stood in long enough and the sensor is armed. Turn the phone volume up: it plays with the silent switch on and through a Bluetooth speaker.</div>
+      <div class="between" style="margin-top:10px;gap:8px;flex-wrap:wrap"><div class="chips">${[["bell", "Bell"], ["soft", "Soft"]].map(([k, l]) => `<button class="chip sm" data-act="chime-kind" data-v="${k}" aria-pressed="${(settings.chime || "bell") === k}">${l}</button>`).join("")}</div><button class="btn sm" data-act="chime-test">▶ Play chime</button></div></div>
+    ${voiceCard()}
+    <div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Saves every run and gets ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>`;
     const q = cap.queue;
     h += `<button class="btn big primary" data-act="cap-ready" ${q.length ? "" : "disabled"}>${!q.length ? "Pick who's running" : q.length === 1 ? `Get ready · ${esc(athleteById(q[0]).name)}` : `Start · ${q.length} athletes taking turns`}</button>`;
     return h;
@@ -1880,7 +1882,7 @@ function settingsHTML() {
   const used = (() => { try { let n = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); n += (localStorage.getItem(k) || "").length; } return n; } catch (e) { return 0; } })();
   let h = `<h1>Settings</h1>`;
   h += `<h2>Athletes</h2><div class="card list">${athletes.length ? athletes.map((a) => `<div class="item" data-act="ath-edit" data-id="${a.id}"><div><b>${esc(a.name)}</b><div class="small muted">${a.kg ? (settings.weightUnit === "lb" ? `${Math.round(a.kg / 0.453592)} lb` : `${a.kg.toFixed(1)} kg`) : "No body weight"}</div></div><div class="r">›</div></div>`).join("") : `<div class="muted">No athletes yet.</div>`}</div><button class="btn" data-act="ath-new">Add athlete</button>`;
-  h += `<h2>Results</h2><div class="card between"><div><b>Hands Free Mode</b><div class="small muted">Save every run, read it out on the Bluetooth speaker, and get ready for the next athlete.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>
+  h += `<h2>Results</h2><div class="card between"><div><b>Hands Free Mode</b><div class="small muted">Save every run and get ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>${voiceCard()}
     <div class="card between"><div><b>Body weight in</b></div><div class="seg" style="width:140px"><button data-act="unit" data-v="lb" aria-pressed="${settings.weightUnit === "lb"}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${settings.weightUnit === "kg"}">kg</button></div></div>
     <div class="card between"><div><b>Look</b></div><div class="seg" style="width:200px"><button data-act="theme" data-v="" aria-pressed="${!settings.theme}">Auto</button><button data-act="theme" data-v="dark" aria-pressed="${settings.theme === "dark"}">Dark</button><button data-act="theme" data-v="light" aria-pressed="${settings.theme === "light"}">Light</button></div></div>`;
   h += `<h2>Vault setup</h2>${setupGuide("runway100")}${setupGuide("runway150")}`;
@@ -1909,7 +1911,8 @@ function render() {
   lcDrawAll(); liveDraw(); LC = Object.fromEntries(Object.entries(LC).filter(([k]) => document.querySelector(`[data-lc="${k}"]`)));
   const tab = { home: "home", new: "new", run: "sessions", sessions: "sessions", session: "sessions", compare: "analytics", analytics: "analytics", settings: "settings", athlete: "settings" }[view];
   document.querySelectorAll(".tabbar [data-go]").forEach((b) => (b.dataset.go === tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
-  const sw = $("#soloSw"); if (sw) sw.onchange = () => { settings.solo = sw.checked; saveSettings(); if (sw.checked) { voiceUnlocked = true; say("Hands free mode on"); } };
+  const sw = $("#soloSw"); if (sw) sw.onchange = () => { settings.solo = sw.checked; saveSettings(); if (sw.checked) unlockAudio(); };
+  const vs = $("#voiceSw"); if (vs) vs.onchange = () => { settings.voice = vs.checked; saveSettings(); unlockAudio(); if (vs.checked) say("Voice on"); };
   const ct = $("#customTarget"); if (ct) ct.onchange = () => { const v = parseInt(ct.value, 10); if (v >= 5 && v <= 80) { cap.target = v; settings.lastTarget = v; saveSettings(); render(); } };
   const imp = $("#importFile"); if (imp) imp.onchange = () => importBackup(imp.files[0]);
 }
@@ -1942,7 +1945,6 @@ document.addEventListener("click", (e) => {
     case "cap-sim-in": toReady(); break;
     case "cap-armnow": if (sensor.connected) arm(true); else toReady(); break;
     case "cap-rewait": arm(); break;
-    case "ready-sound": settings.readySound = v; saveSettings(); unlockAudio(); if (v !== "voice") chime(); if (v === "voice") say("Ready"); render(); break;
     case "chime-kind": settings.chime = v; saveSettings(); unlockAudio(); chime(); render(); break;
     case "chime-test": unlockAudio(); chime(); break;
     case "cap-save": keepRun(cap.run); cap.lastRun = cap.run; cap.lastSaved = true; toast("Saved"); arm(); break;
