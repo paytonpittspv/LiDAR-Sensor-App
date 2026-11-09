@@ -102,6 +102,8 @@ async function poll() {
 // poll faster while a run is live
 // the copy on the web (https) can't reach the sensor: browsers block a secure page from talking to it
 const WEB_COPY = location.protocol === "https:";
+// the web copy works offline once it's been opened (the sensor's own copy is always offline anyway)
+if (WEB_COPY && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 function pollLoop() {
   if (WEB_COPY) { const p = $("#conn"); p.className = "pill off"; p.textContent = "Practice"; return; } poll().finally(() => setTimeout(pollLoop, view === "new" && ["waiting", "ready", "recording"].includes(cap.phase) ? 120 : 250)); }
 

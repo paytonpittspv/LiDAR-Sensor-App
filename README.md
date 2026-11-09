@@ -5,6 +5,14 @@ timing gates and no camera calibration.
 
 **Practice app:** https://paytonpittspv.github.io/LiDAR-Sensor-App/
 
+**Install it like an app:** open the link on your phone, then
+- **iPhone (Safari):** Share → **Add to Home Screen**
+- **Android (Chrome):** ⋮ menu → **Install app** (or Add to Home screen)
+
+It gets its own icon, opens full screen without the browser bars, and works offline once it's
+been opened. Do the same from **http://192.168.4.1** while on the sensor's Wi-Fi to install the
+sensor's copy (the one that records).
+
 The practice website runs the full app with simulated runs. You can add athletes, try sprint
 and vault sessions, Hands Free Mode and the reports. To record for real, join the sensor's
 Wi-Fi (`SpeedLidar`, password `vault1234`) and open **http://192.168.4.1**. Browsers block a
@@ -45,7 +53,8 @@ Wiring: TF03 red → 5V, black → GND, brown (TX) → GPIO16, blue (RX) → GPI
 The source is in `src/`. After editing, rebuild and commit both outputs:
 
 ```
-python3 src/build.py      # writes index.html and firmware/SpeedLidar/page.h
+python3 src/build.py      # writes index.html, manifest, sw.js, firmware/SpeedLidar/page.h and assets.h
+node src/icons/make_icons.js   # only if you change src/icons/icon.svg (needs Playwright)
 cd src && node test_engine.js
 ```
 
