@@ -1,6 +1,6 @@
 // Offline support for the web copy of the app (GitHub Pages). The sensor serves its own copy over
 // plain http, where browsers don't run service workers, so this only matters on the web.
-const VERSION = "9c56ee6bf5";
+const VERSION = "10634087c9";
 const CACHE = "lidar-sensor-" + VERSION;
 const ASSETS = ["./", "index.html", "manifest.webmanifest", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/favicon-32.png"];
 

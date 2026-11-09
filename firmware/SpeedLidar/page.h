@@ -793,7 +793,78 @@ const Engine = (() => {
 // ===== ENGINE END =====
 
 // ===== APP START =====
-(() => {
+// ---------------- storage (on this phone) ----------------
+// Everything is kept in the phone's database (IndexedDB), which holds far more than the old 5 MB storage,
+// and the app asks the browser to never clear it on its own. Every change is written the moment it happens.
+// A small copy also goes in localStorage (settings, athletes, the session and the 3 newest runs), written
+// instantly, so even a refresh in the split second before the database finishes can't lose a run.
+const Store = (() => {
+  const NAME = "paytons-lidar", OS = "kv", KEYS = ["athletes", "runs", "settings", "session"], SMALL = ["athletes", "settings", "session"];
+  const cache = {}; let db = null, mode = "local", persisted = null, usage = null, quota = null, onError = () => {};
+  const ls = {
+    get(k) { try { const v = localStorage.getItem("pls." + k); return v == null ? undefined : JSON.parse(v); } catch (e) { return undefined; } },
+    set(k, v) { try { localStorage.setItem("pls." + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+    del(k) { try { localStorage.removeItem("pls." + k); } catch (e) {} },
+  };
+  const open = () => new Promise((res, rej) => {
+    if (!window.indexedDB) return rej(new Error("no database"));
+    const t = setTimeout(() => rej(new Error("timeout")), 5000);
+    let rq; try { rq = indexedDB.open(NAME, 1); } catch (e) { clearTimeout(t); return rej(e); }
+    rq.onupgradeneeded = () => rq.result.createObjectStore(OS);
+    rq.onsuccess = () => { clearTimeout(t); res(rq.result); };
+    rq.onerror = () => { clearTimeout(t); rej(rq.error); };
+  });
+  const run = (m, fn) => new Promise((res, rej) => {
+    const t = db.transaction(OS, m), out = fn(t.objectStore(OS));
+    t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error("aborted"));
+  });
+  // join run lists by id; later lists win (they were written more recently)
+  const merge = (...lists) => { const m = new Map(); for (const l of lists) for (const r of l || []) if (r && r.id) m.set(r.id, r); return [...m.values()].sort((a, b) => b.ts - a.ts); };
+  async function load() {
+    try { db = await open(); mode = "db"; } catch (e) { db = null; mode = "local"; }
+    if (mode === "db") {
+      try {
+        const got = await run("readonly", (s) => { const o = {}; for (const k of KEYS) s.get(k).onsuccess = (ev) => { o[k] = ev.target.result; }; return o; });
+        for (const k of SMALL) { const l = ls.get(k); cache[k] = l !== undefined ? l : got[k]; }
+        // old saved runs (from before the database) and the instant copy of the newest runs are folded in
+        cache.runs = merge(got.runs, ls.get("runs"), ls.get("recent"));
+        await run("readwrite", (s) => { for (const k of KEYS) if (cache[k] !== undefined) s.put(cache[k], k); });
+        ls.del("runs");   // now safely in the database, which frees the old storage
+      } catch (e) { db = null; mode = "local"; }
+    }
+    if (mode === "local") {
+      for (const k of SMALL) cache[k] = ls.get(k);
+      cache.runs = merge(ls.get("runs"), ls.get("recent"));
+    }
+    refreshInfo(true);
+  }
+  function refreshInfo(ask) {
+    try {
+      const S = navigator.storage; if (!S) return;
+      if (S.persisted) S.persisted().then((p) => { persisted = p; if (!p && ask && S.persist) return S.persist().then((q) => (persisted = q)); }).catch(() => {});
+      if (S.estimate) S.estimate().then((e) => { usage = e.usage; quota = e.quota; }).catch(() => {});
+    } catch (e) {}
+  }
+  function get(k, d) { return cache[k] === undefined ? d : cache[k]; }
+  function set(k, v) {
+    cache[k] = v;
+    if (SMALL.includes(k)) ls.set(k, v);
+    if (k === "runs") ls.set("recent", v.slice(0, 3));
+    if (mode === "local") {
+      if (k === "runs" && !ls.set("runs", v)) { onError(); return false; }
+      return true;
+    }
+    try {
+      const t = db.transaction(OS, "readwrite"); t.objectStore(OS).put(v, k);
+      t.onabort = t.onerror = () => onError(t.error);
+      if (k === "runs") t.oncomplete = () => refreshInfo(false);
+    } catch (e) { onError(e); return false; }
+    return true;
+  }
+  const info = () => ({ mode, persisted, usage, quota, secure: !!window.isSecureContext });
+  return { ready: load(), get, set, info, protect: () => refreshInfo(true), onError: (f) => (onError = f) };
+})();
+Store.ready.then(() => {
 "use strict";
 const $ = (s, r = document) => r.querySelector(s);
 const FT = Engine.FT;
@@ -807,11 +878,10 @@ const dayKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${St
 const dayLabel = (key, long) => { const [y, m, d] = key.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString([], long ? { weekday: "long", month: "long", day: "numeric", year: "numeric" } : { month: "short", day: "numeric" }); };
 const timeLabel = (ts) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
-// ---------------- storage (on this phone) ----------------
-const DB = {
-  get(k, d) { try { const v = localStorage.getItem("pls." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem("pls." + k, JSON.stringify(v)); return true; } catch (e) { toast("Couldn't save: this phone's storage is full. Export a backup in Settings, then clear old runs."); return false; } },
-};
+// ---------------- storage ----------------
+const DB = { get: Store.get, set: Store.set };
+const standalone = () => { try { return navigator.standalone === true || matchMedia("(display-mode: standalone)").matches; } catch (e) { return false; } };
+Store.onError(() => toast("Couldn't save: this phone's storage is full. Export a backup in Settings, then delete old runs."));
 let athletes = DB.get("athletes", []);
 let runs = DB.get("runs", []).map((r) => (r.setup === "polerun" ? Object.assign(r, { setup: "polerun100" }) : r));
 let settings = Object.assign({ midOut: 4, voice: false, chime: "original", solo: false, theme: null, weightUnit: "lb", lastAthlete: null, lastMode: "sprint", lastTarget: 30, lastSetup: "runway100" }, DB.get("settings", {}));
@@ -1933,14 +2003,18 @@ function analyticsHTML() {
 }
 
 function settingsHTML() {
-  const used = (() => { try { let n = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); n += (localStorage.getItem(k) || "").length; } return n; } catch (e) { return 0; } })();
+  const si = Store.info(), mb = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${(b / 1e6).toFixed(1)} MB`);
+  const where = si.mode === "db" ? `in the phone's database${si.usage != null ? ` (${mb(si.usage)} used${si.quota ? ` of ${mb(si.quota)} available` : ""})` : ""}` : "in the phone's basic storage (the database didn't open: reload the app)";
+  const kept = si.persisted ? "Protected: the phone won't clear it on its own."
+    : standalone() ? "Saved in the home-screen app, which the phone doesn't clear on its own."
+    : "Open the app from its home-screen icon so the phone never clears it on its own. Runs saved in a browser tab can be cleared after a week without visiting.";
   let h = `<h1>Settings</h1>`;
   h += `<h2>Athletes</h2><div class="card list">${athletes.length ? athletes.map((a) => `<div class="item" data-act="ath-edit" data-id="${a.id}"><div><b>${esc(a.name)}</b><div class="small muted">${a.kg ? (settings.weightUnit === "lb" ? `${Math.round(a.kg / 0.453592)} lb` : `${a.kg.toFixed(1)} kg`) : "No body weight"}</div></div><div class="r">›</div></div>`).join("") : `<div class="muted">No athletes yet.</div>`}</div><button class="btn" data-act="ath-new">Add athlete</button>`;
   h += `<h2>Results</h2><div class="card between"><div><b>Hands Free Mode</b><div class="small muted">Save every run and get ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>${voiceCard()}
     <div class="card between"><div><b>Body weight in</b></div><div class="seg" style="width:140px"><button data-act="unit" data-v="lb" aria-pressed="${settings.weightUnit === "lb"}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${settings.weightUnit === "kg"}">kg</button></div></div>
     <div class="card between"><div><b>Look</b></div><div class="seg" style="width:200px"><button data-act="theme" data-v="" aria-pressed="${!settings.theme}">Auto</button><button data-act="theme" data-v="dark" aria-pressed="${settings.theme === "dark"}">Dark</button><button data-act="theme" data-v="light" aria-pressed="${settings.theme === "light"}">Light</button></div></div>`;
   h += `<h2>Vault setup</h2>${setupGuide("runway100")}${setupGuide("runway150")}`;
-  h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">The app lives on the sensor and needs no internet. Runs are saved on this phone (${runs.length} runs, ${(used / 1024).toFixed(0)} KB). Export a backup now and then, and to move runs to another phone.</div>
+  h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">The app lives on the sensor and needs no internet. ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
     <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
     <div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps.</div><button class="btn" data-act="demo-data">Add demo data</button> <button class="btn danger" data-act="clear-all">Delete all runs</button></div>`;
   h += `<p class="small muted" style="text-align:center;margin-top:20px">PAYTON'S LiDAR SENSOR · designed by Payton Pitts</p>`;
@@ -2484,7 +2558,7 @@ document.addEventListener("click", (e) => {
 // ---------------- start ----------------
 document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 render(); pollLoop();
-})();
+});
 // ===== APP END =====
 
 </script>
