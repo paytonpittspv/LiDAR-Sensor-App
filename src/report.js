@@ -227,15 +227,15 @@ function vaultChartSVG(run, steps) {
       const yb = Y(0);
       s += `<line x1="${pl}" x2="${W - pr}" y1="${yb}" y2="${yb}" stroke="#8e89ad" stroke-width="1"/>`;
       // rights: small grey dots on the line, so the step length between feet is visible
-      for (const p of steps) if (!p.left) s += `<circle cx="${X(-p.ft)}" cy="${Y(p.speed)}" r="3.6" fill="#b9b4d2" stroke="#fff" stroke-width="1"/>`;
+      for (const p of steps) if (!p.left) s += `<circle cx="${X(-p.ft)}" cy="${Y(p.speed)}" r="2.4" fill="#aaa5c6"/>`;
       lefts.forEach((p, i) => {
         const x = X(-p.ft), y = Y(p.speed), ty = yb + 8 + row[i] * (tagH + 4);
-        s += `<line x1="${x}" x2="${x}" y1="${y + 6}" y2="${ty}" stroke="${ACC}" stroke-opacity=".35" stroke-dasharray="2 3"/>`;
-        s += `<circle cx="${x}" cy="${y}" r="5.5" fill="${ACC}" stroke="#fff" stroke-width="1.5"/>`;
-        s += `<text x="${x}" y="${y - 10}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${INK}">${f2(p.speed)}</text>`;
-        s += `<rect x="${x - 19}" y="${ty}" width="38" height="${tagH}" rx="6" fill="#fff" stroke="${ACC}" stroke-opacity=".55"/>`;
-        s += `<text x="${x}" y="${ty + 12}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${ACC}">${p.takeoff ? "TO" : "L" + p.num}</text>`;
-        s += `<text x="${x}" y="${ty + 25}" text-anchor="middle" font-size="10" font-weight="600" fill="${INK}">${Math.round(p.spot)}'</text>`;
+        s += `<line x1="${x}" x2="${x}" y1="${y + 5}" y2="${yb}" stroke="${ACC}" stroke-opacity=".28" stroke-width="1"/>`;
+        s += `<line x1="${x}" x2="${x}" y1="${yb}" y2="${yb + 4}" stroke="${ACC}" stroke-width="1.4"/>`;
+        s += p.takeoff ? `<circle cx="${x}" cy="${y}" r="4" fill="#fff" stroke="${ACC}" stroke-width="1.8"/>` : `<circle cx="${x}" cy="${y}" r="3.6" fill="${ACC}" stroke="#fff" stroke-width="1.2"/>`;
+        s += `<text x="${x}" y="${y - 9}" text-anchor="middle" font-size="10" font-weight="600" fill="${INK}">${f2(p.speed)}</text>`;
+        s += `<text x="${x}" y="${ty + 9}" text-anchor="middle" font-size="9.5" font-weight="700" letter-spacing=".4" fill="${ACC}">${p.takeoff ? "TO" : "L" + p.num}</text>`;
+        s += `<text x="${x}" y="${ty + 22}" text-anchor="middle" font-size="10" fill="${INK}">${Math.round(p.spot)}'</text>`;
       });
       return s;
     } });
@@ -379,6 +379,170 @@ function openSessionReport(ids) {
   if (!list.length) { toast("No saved runs in this session."); return; }
   const el = $("#report");
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + sessionReport(list);
+  el.classList.remove("hidden"); el.scrollTop = 0;
+  const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
+  fit(); window.addEventListener("resize", fit, { once: true });
+}
+
+// ---------- athlete comparison report: the athletes picked in Analytics, side by side for one test ----------
+const CMP_COLORS = [ACC, ACC2, ACC3, "#e08a00"];
+function compareStats(aid, test) {
+  const isS = test.startsWith("sprint"), km = keyMetric(test);
+  const tr = runs.filter((r) => r.athleteId === aid && testKey(r) === test && !r.res.error).sort((a, b) => a.ts - b.ts);
+  const vals = tr.map(km.pick).filter((v) => v != null && isFinite(v));
+  const o = { aid, name: athleteById(aid).name, tr, n: tr.length, best: bestOf(tr, km.pick, "high"), avg: avgOf(vals), sd: sdOf(vals), first: tr[0], last: tr[tr.length - 1] };
+  o.top = bestOf(tr, (r) => r.res.top.speed, "high");
+  if (isS) {
+    o.fly = bestOf(tr, (r) => r.res.fly10 && r.res.fly10.time, "low"); o.time = bestOf(tr, (r) => r.res.time, "low");
+    o.toTop = avgOf(tr.map((r) => r.res.top.dist).filter(isFinite));
+    const st = tr.filter((r) => r.res.stride); o.freq = avgOf(st.map((r) => r.res.stride.freq)); o.len = avgOf(st.map((r) => r.res.stride.length));
+    const pw = tr.map((r) => r.res.fv && (r.res.fv.P0abs || null)).filter(Boolean); o.power = pw.length ? Math.max(...pw) : null;
+  } else {
+    const sTop = sprintTopFor(aid); o.sprintTop = sTop ? sTop.v : null; o.carry = sTop && o.avg ? o.avg / sTop.v : null;
+    o.lefts = modeOf(tr.map((r) => r.res.steps.lefts).filter(Boolean));
+    const TO = tr.map((r) => r.res.takeoff.outFt).filter((x) => x != null), SM = tr.map((r) => r.res.startMarkFt).filter((x) => x != null);
+    o.to = avgOf(TO); o.toSd = sdOf(TO); o.sm = avgOf(SM); o.smSd = sdOf(SM);
+    const fz = tr.map((r) => r.res.finish && r.res.finish.change).filter((x) => x != null && isFinite(x)); o.into = avgOf(fz); o.slowed = fz.filter((x) => x <= -0.1).length; o.intoN = fz.length;
+    // average spot of each left, counted back from the takeoff
+    o.leftAvg = {};
+    for (let k = 0; k <= 9; k++) { const xs = []; for (const r of tr) { const c = contactsOf(r).find((c) => c.left && c.out === k); if (c) xs.push(spotFt(r, c)); } if (xs.length) o.leftAvg[k] = { ft: avgOf(xs), sd: sdOf(xs), n: xs.length }; }
+  }
+  return o;
+}
+function compareReport(test, ids) {
+  const isS = test.startsWith("sprint"), km = keyMetric(test), setup = isS ? null : test.split("-")[1];
+  const A = ids.map((id) => compareStats(id, test)).filter((o) => o.best).sort((x, y) => y.best.v - x.best.v);
+  const col = {}; A.forEach((o, i) => (col[o.aid] = CMP_COLORS[i % CMP_COLORS.length]));
+  const all = A.flatMap((o) => o.tr), t0 = Math.min(...all.map((r) => r.ts)), t1 = Math.max(...all.map((r) => r.ts));
+  const dfmt = (ts) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const head = `<div class="rhead"><span>LiDAR SENSOR</span><span>ATHLETE COMPARISON</span></div>`;
+  const dot = (aid, s = 9) => `<span class="cdot" style="width:${s}px;height:${s}px;background:${col[aid]}"></span>`;
+  const lead = A[0], lastA = A[A.length - 1], firsts = A.map((o) => o.name.split(" ")[0]);
+  const short = (o) => { const f = o.name.split(" ")[0]; return firsts.filter((x) => x === f).length > 1 ? o.name : f; };
+  const steady = A.filter((o) => o.sd != null).sort((x, y) => x.sd - y.sd)[0];
+  const m = (k, v, u, sub, cls) => `<div class="m ${cls || ""}"><div class="k">${k}</div><div class="v">${v}${u ? `<small>${u}</small>` : ""}</div>${sub ? `<div class="k" style="margin-top:2px">${sub}</div>` : ""}</div>`;
+  const label = isS ? "Top speed" : "Last 5 m into takeoff";
+  // ranking: bars start at a floor below the slowest so the gaps are visible, value and gap to the leader on the right
+  const lo = Math.floor((lastA.best.v - 0.3) * 10) / 10, hi = lead.best.v;
+  const rank = A.map((o, i) => `<div class="crank"><span class="n">${i + 1}</span><span class="nm">${dot(o.aid)}${esc(o.name)}<small>${o.n} run${o.n > 1 ? "s" : ""} · avg ${f2(o.avg)} m/s</small></span>
+      <span class="barbg"><i style="width:${(8 + 92 * ((o.best.v - lo) / Math.max(0.01, hi - lo))).toFixed(1)}%;background:${col[o.aid]}"></i></span>
+      <b>${f2(o.best.v)}<small> m/s</small></b><span class="gap">${i ? signed(o.best.v - lead.best.v) : "leader"}</span></div>`).join("");
+  // trend: best per day, one line per athlete
+  const days = [...new Set(all.map((r) => dayKey(r.ts)))].sort(), dx = (k) => (new Date(k).getTime() - new Date(days[0]).getTime()) / 864e5, xEnd = Math.max(1, dx(days[days.length - 1]));
+  let ylo = 1e9, yhi = -1e9; const series = [], dots = [];
+  for (const o of A) {
+    const by = bestPerDay(o.tr, km.pick), ds = Object.keys(by).sort(), X = ds.map(dx), Y = ds.map((d) => by[d].v);
+    Y.forEach((y) => { ylo = Math.min(ylo, y); yhi = Math.max(yhi, y); });
+    series.push({ x: X, y: Y, color: col[o.aid], w: 2.2 }); X.forEach((x, j) => dots.push({ x, y: Y[j], r: 3.4, fill: "#fff", stroke: col[o.aid], sw: 1.8 }));
+  }
+  const pad = Math.max(0.1, (yhi - ylo) * 0.2), yt = niceTicks(ylo - pad, yhi + pad, 5);
+  const xt = []; { const n = Math.min(6, days.length); for (let i = 0; i < n; i++) xt.push(n === 1 ? 0 : (xEnd * i) / (n - 1)); }
+  const trend = svgChart({ aria: "Best per day", w: 730, h: 142, pad: [44, 14, 10, 34], x0: -0.4, x1: xEnd + 0.4, y0: yt[0], y1: yt[yt.length - 1], font: 11, textColor: INK2, gridColor: "#efecf6",
+    xt, xfmt: (t) => new Date(new Date(days[0]).getTime() + t * 864e5 + 12 * 36e5).toLocaleDateString([], { month: "short", day: "numeric" }), yt, yfmt: (t) => t.toFixed(1), yl: "m/s", series, dots });
+  const lg = legend(A.map((o) => [SW_LINE(col[o.aid], 2.5), esc(o.name)]));
+  // the written takeaways
+  const notes = [];
+  if (A.length > 1) notes.push(`${B(esc(lead.name))} has the best ${km.label}: ${B(f2(lead.best.v) + " m/s")}${isS ? ` (${f1(mph(lead.best.v))} mph)` : ""}, ${f2(lead.best.v - A[1].best.v)} m/s ahead of ${esc(A[1].name)}.`);
+  if (steady && A.length > 1) notes.push(`Most repeatable: ${B(esc(steady.name))}, whose ${km.label} varies by only ±${f2(steady.sd)} m/s from run to run.`);
+  const imp = A.map((o) => { const by = bestPerDay(o.tr, km.pick), ds = Object.keys(by).sort(); return ds.length > 1 ? { o, d: by[ds[ds.length - 1]].v - by[ds[0]].v } : null; }).filter(Boolean).sort((x, y) => y.d - x.d);
+  if (imp.length && imp[0].d > 0.02) notes.push(`Biggest gain over this period: ${B(esc(imp[0].o.name))}, ${signed(imp[0].d)} m/s from first to latest session.`);
+  if (isS) {
+    const f = A.filter((o) => o.fly).sort((x, y) => x.fly.v - y.fly.v); if (f.length > 1) notes.push(`Fastest flying 10 m: ${B(esc(f[0].name))} in ${f2(f[0].fly.v)} s.`);
+    const st = A.filter((o) => o.freq); if (st.length > 1) { const fq = st.slice().sort((x, y) => y.freq - x.freq)[0], ln = st.slice().sort((x, y) => y.len - x.len)[0]; notes.push(fq.aid === ln.aid ? `${esc(fq.name)} has both the quickest steps and the longest stride at top speed.` : `Different routes to speed: ${esc(fq.name)} has the quickest step rate (${f2(fq.freq)}/s), ${esc(ln.name)} the longest step (${f2(ln.len)} m).`); }
+  } else {
+    const c = A.filter((o) => o.carry).sort((x, y) => y.carry - x.carry); if (c.length > 1) notes.push(`${B(esc(c[0].name))} carries the most sprint speed to the plant (${Math.round(c[0].carry * 100)}%); ${esc(c[c.length - 1].name)} the least (${Math.round(c[c.length - 1].carry * 100)}%).`);
+    const t = A.filter((o) => o.toSd != null).sort((x, y) => x.toSd - y.toSd); if (t.length > 1) notes.push(`Most consistent takeoff: ${B(esc(t[0].name))} (${spreadFt(t[0].toSd)}). Least: ${esc(t[t.length - 1].name)} (${spreadFt(t[t.length - 1].toSd)}).`);
+    const sl = A.filter((o) => o.intoN && o.slowed / o.intoN >= 0.5); if (sl.length) notes.push(`Slowing into the box on most jumps: ${sl.map((o) => esc(o.name)).join(", ")}. That speed is lost right where it matters.`);
+  }
+  const p1 = `<div class="page">${head}
+    <div class="box btop">${brandBlock(`Athlete comparison report<br>TF03 LiDAR · 1000 Hz · <b style="color:${INK}">${UNC}</b>`)}
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:12px;gap:12px;flex-wrap:wrap">
+        <div><div class="eyebrow">COMPARISON · ${testName(test).toUpperCase()}</div><div class="who">${A.map((o) => esc(o.name)).join(` <span style="color:${INK2};font-weight:400;font-size:18px">vs</span> `)}</div></div>
+        <div style="color:${INK2};font-size:13px;text-align:right">${dfmt(t0)}${dayKey(t0) !== dayKey(t1) ? ` – ${dfmt(t1)}` : ""}<br>${all.length} runs · ${days.length} session${days.length > 1 ? "s" : ""}</div></div>
+      <div class="metrics" style="grid-template-columns:1.35fr 1fr 1fr 1fr">
+        <div class="m hero" style="grid-row:auto"><div class="k">Best ${km.label}</div><div class="v" style="font-size:40px">${f2(lead.best.v)}<small style="font-size:16px">m/s</small></div><div class="k">${dot(lead.aid, 8)} ${esc(lead.name)} · ${dfmt(lead.best.r.ts)}</div></div>
+        ${m("Gap first to last", A.length > 1 ? f2(lead.best.v - lastA.best.v) : "—", "m/s", A.length > 1 ? `${esc(short(lastA))} to ${esc(short(lead))}` : "", "")}
+        ${m("Most repeatable", steady ? `<span style="font-size:${steady.name.length > 12 ? 17 : 22}px">${esc(steady.name)}</span>` : "—", "", steady ? `±${f2(steady.sd)} m/s run to run` : "needs 2+ runs each", "hl")}
+        ${isS ? m("Fastest fly 10 m", (() => { const f = A.filter((o) => o.fly).sort((x, y) => x.fly.v - y.fly.v)[0]; return f ? f2(f.fly.v) : "—"; })(), "s", (() => { const f = A.filter((o) => o.fly).sort((x, y) => x.fly.v - y.fly.v)[0]; return f ? esc(f.name) : ""; })())
+          : m("Best carry", (() => { const c = A.filter((o) => o.carry).sort((x, y) => y.carry - x.carry)[0]; return c ? Math.round(c.carry * 100) : "—"; })(), "%", (() => { const c = A.filter((o) => o.carry).sort((x, y) => y.carry - x.carry)[0]; return c ? `${esc(c.name)} · of sprint top speed` : "run a sprint test"; })())}
+      </div></div>
+    <div class="box"><div class="between" style="display:flex;justify-content:space-between;align-items:baseline"><h4>Ranking · best ${km.label}</h4><span style="color:${INK2};font-size:11px">gap to the leader in m/s</span></div>${rank}</div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Best ${km.label} per session</h4><span style="color:${INK2};font-size:11px">one point per athlete per day</span></div>${trend}${lg}</div>
+    <div class="box"><h4>Key takeaways</h4><ul class="sum">${notes.slice(0, 4).map((n) => `<li>${n}</li>`).join("")}</ul></div>
+    ${footer(1, 2)}</div>`;
+
+  // ---- page 2: every number side by side, and the speed curves of each athlete's best run
+  const rowsDef = isS ? [
+    ["Best top speed", (o) => o.best.v, (v) => f2(v), "m/s", "high"],
+    ["Average top speed", (o) => o.avg, (v) => f2(v), "m/s", "high"],
+    ["Top speed in mph", (o) => mph(o.best.v), (v) => f1(v), "mph", "high"],
+    ["Run to run spread", (o) => o.sd, (v) => "±" + f2(v), "m/s", "low"],
+    ["Fastest flying 10 m", (o) => o.fly && o.fly.v, (v) => f2(v), "s", "low"],
+    [`Best ${test.split("-")[1]} m time`, (o) => o.time && o.time.v, (v) => f2(v), "s", "low"],
+    ["Distance to top speed", (o) => o.toTop, (v) => f1(v), "m", null],
+    ["Step rate at top speed", (o) => o.freq, (v) => f2(v), "/s", "high"],
+    ["Step length at top speed", (o) => o.len, (v) => f2(v), "m", "high"],
+    ["Peak power", (o) => o.power, (v) => Math.round(v), "W", "high"],
+    ["Runs", (o) => o.n, (v) => v, "", null],
+  ] : [
+    ["Best last 5 m", (o) => o.best.v, (v) => f2(v), "m/s", "high"],
+    ["Average last 5 m", (o) => o.avg, (v) => f2(v), "m/s", "high"],
+    ["Run to run spread", (o) => o.sd, (v) => "±" + f2(v), "m/s", "low"],
+    ["Best top speed", (o) => o.top && o.top.v, (v) => f2(v), "m/s", "high"],
+    ["Carry (avg last 5 m ÷ sprint top)", (o) => o.carry, (v) => Math.round(v * 100) + "%", "", "high"],
+    ["Into the box (avg change)", (o) => o.into, (v) => signed(v), "m/s", "high"],
+    ["Lefts (most often)", (o) => o.lefts, (v) => v, "", null],
+    ["Takeoff from the box", (o) => o.to, (v) => ftLabel(v), "", null],
+    ["Takeoff spread", (o) => o.toSd, (v) => spreadFt(v), "", "low"],
+  ];
+  const tbl = `<table class="ctab"><colgroup><col style="width:${A.length > 3 ? 28 : 34}%">${A.map(() => "<col>").join("")}</colgroup><thead><tr><th></th>${A.map((o) => `<th>${dot(o.aid, 8)}${esc(o.name)}</th>`).join("")}</tr></thead><tbody>${rowsDef.map(([k, get, fmt, u, better]) => {
+    const vs = A.map((o) => { const v = get(o); return v == null || !isFinite(v) ? null : v; }), ok = vs.filter((v) => v != null);
+    // compare what's printed: a tie is pink for everyone in it, and nothing is pink if they're all the same
+    const shown = vs.map((v) => (v == null ? null : String(fmt(v)))), bestV = better && ok.length > 1 ? String(fmt(better === "high" ? Math.max(...ok) : Math.min(...ok))) : null;
+    const allSame = new Set(shown.filter((x) => x != null)).size < 2;
+    return `<tr><td>${k}${u ? ` <span class="u">${u}</span>` : ""}</td>${vs.map((v, i) => `<td class="${!allSame && shown[i] != null && shown[i] === bestV ? "lead" : ""}">${v == null ? "–" : fmt(v)}</td>`).join("")}</tr>`;
+  }).join("")}</tbody></table>`;
+  // each athlete's best run
+  const cs = [];
+  for (const o of A) {
+    const b = o.best.r, c = b.res.curve;
+    if (isS) { let k = c.d.findIndex((x) => x > b.target); if (k < 0) k = c.d.length; const k0 = Math.max(0, c.t.findIndex((t) => t >= 0)); cs.push({ x: c.d.slice(k0, k), y: c.v.slice(k0, k), color: col[o.aid], w: 2.2 }); }
+    else { const xs = c.d.map((x) => (x - b.res.takeoff.dist) / FT); let k = xs.findIndex((x) => x > 0); if (k < 0) k = xs.length; cs.push({ x: xs.slice(0, k), y: c.v.slice(0, k), color: col[o.aid], w: 2.2 }); }
+  }
+  const cymax = isS ? Math.ceil((Math.max(...cs.map((s) => Math.max(...s.y))) + 0.3) * 2) / 2 : Math.ceil(Math.max(...cs.map((s) => Math.max(...s.y))) + 0.8);
+  const cymin = isS ? Math.floor((Math.min(...cs.map((s) => { const k = s.x.findIndex((x) => x >= 10); return k < 0 ? s.y[0] : s.y[k]; })) - 0.3) * 2) / 2 : 0;
+  const cxa = isS ? 10 : Math.max(-140, Math.floor(Math.min(...cs.map((s) => s.x[0])) / 10) * 10), cxb = isS ? Math.max(...A.map((o) => o.best.r.target)) : 0;
+  const curves = svgChart({ aria: "Best runs compared", w: 730, h: isS ? 290 : 128, pad: [44, 14, 10, 34], x0: cxa, x1: cxb, y0: cymin, y1: cymax, font: 11, textColor: INK2, gridColor: "#efecf6",
+    xt: niceTicks(cxa, cxb, 10), xfmt: (t) => (isS ? `${t} m` : t === 0 ? "TO" : `${Math.abs(t)}'`), yt: niceTicks(cymin, cymax, 5), yfmt: (t) => (isS ? t.toFixed(1) : t), yl: "m/s", xl: isS ? "Distance from the start" : "Feet before the takeoff",
+    shades: isS ? [] : [{ a: -5 / FT, b: 0, color: ACC2, op: 0.1 }], series: cs });
+  const clg = legend(A.map((o) => [SW_LINE(col[o.aid], 2.5), `${esc(o.name)} · ${dfmt(o.best.r.ts)}`]));
+  // vault: where each athlete's lefts land on average
+  let leftsBox = "";
+  if (!isS) {
+    const items = A.map((o) => ({ label: o.name, run: { mode: "vault", setup, res: { startMarkFt: o.sm, steps: { lefts: o.lefts }, contacts: Object.entries(o.leftAvg).map(([k, v]) => ({ left: true, out: +k, takeoff: +k === 0, n: null, boxFt: v.ft })).sort((a, b) => b.out - a.out) } } }));
+    const maxOut = Math.max(0, ...A.map((o) => Math.max(0, ...Object.keys(o.leftAvg).map(Number))));
+    const cols = []; for (let k = 0; k <= Math.min(maxOut, 8); k++) cols.push(k);
+    leftsBox = `<div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Where the lefts land · average of every jump</h4><span style="color:${INK2};font-size:11px">feet from the ${SETUPS[setup] && SETUPS[setup].pole ? "box mark" : "box"}</span></div>
+      <div class="rmap">${runwayMap(items, { mid: settings.midOut, W: 580, laneH: 21, gutter: 92 })}</div>
+      <table class="ctab lefts"><colgroup><col style="width:17%"><col style="width:9%">${cols.map(() => "<col>").join("")}</colgroup><thead><tr><th></th><th>Start</th>${cols.map((k) => `<th class="${k === settings.midOut ? "mid" : ""}">${k === 0 ? "TO" : k + " out"}</th>`).join("")}</tr></thead><tbody>${A.map((o) => `<tr><td>${dot(o.aid, 8)}${esc(o.name)}</td><td>${o.sm != null ? ftLabel(o.sm) : "–"}</td>${cols.map((k) => { const v = o.leftAvg[k]; return `<td class="${k === settings.midOut ? "mid" : ""}">${v ? ftLabel(v.ft) + (v.sd != null ? `<small>${spreadFt(v.sd)}</small>` : "") : "–"}</td>`; }).join("")}</tr>`).join("")}</tbody></table>
+      <div style="font-size:10px;color:${INK2};margin-top:4px">Dashed line: the mid mark (${settings.midOut} lefts out), averaged over everyone. Small numbers are how much that left moves from jump to jump.</div></div>`;
+  }
+  const guide = isS
+    ? `<div class="guide"><div><b>Best vs average top speed</b><p>The best run shows what each athlete can reach; the average shows what they bring on a normal day. A big gap between them means the top speed isn't repeatable yet.</p></div>
+      <div><b>Step rate and step length</b><p>Top speed is rate × length. Athletes reach the same speed in different ways, so compare each athlete against their own numbers over time, not against each other.</p></div></div>`
+    : `<div class="guide"><div><b>Last 5 m and carry</b><p>The last 5 m is the speed the pole has to work with. Carry shows how much of each athlete's sprint speed survives the pole carry and the plant, which separates a speed problem from an approach problem.</p></div>
+      <div><b>Takeoff spread and lefts</b><p>A small takeoff spread with the same lefts means a run-up that repeats. Use the left columns to set each athlete's mid mark where their left actually lands.</p></div></div>`;
+  const p2 = `<div class="page">${head}
+    <div class="box"><h4>Side by side</h4>${tbl}<div style="font-size:10.5px;color:${INK2};margin-top:6px">Best value in each row in pink. Averages use every ${testName(test).toLowerCase()} run in the period.</div></div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>${isS ? "Speed from 10 m to the finish · each athlete's best run" : "Speed into the takeoff · each athlete's best jump"}</h4></div>${curves}${clg}</div>
+    ${leftsBox}
+    ${isS ? `<div class="box">${guide}</div>` : ""}
+    ${footer(2, 2)}</div>`;
+  return p1 + p2;
+}
+function openCompareReport(test, ids) {
+  const el = $("#report");
+  el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + compareReport(test, ids);
   el.classList.remove("hidden"); el.scrollTop = 0;
   const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
   fit(); window.addEventListener("resize", fit, { once: true });

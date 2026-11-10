@@ -573,47 +573,76 @@ function finishTag(R) {
   const c = f.change, word = c >= 0.1 ? "Speeding up" : c <= -0.1 ? "Slowing" : "Holding speed";
   return { c, cls: c >= 0.1 ? "up" : c <= -0.1 ? "down" : "flat", text: `${word} into the box`, value: `${c >= 0 ? "+" : "−"}${Math.abs(c).toFixed(2)}`, accel: f.accel };
 }
-// runway map: one lane per jump, box on the right; lefts pink with their spot in feet, rights grey
+// the sensor seen from above: case with the lens facing down the runway (toward the box on the right)
+function sensorGlyph(x, y, s = 1, lensRight = true) {
+  const w = 13 * s, h = 9 * s;
+  return `<g aria-hidden="true"><rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="${2 * s}" fill="var(--text)"/>`
+    + `<rect x="${lensRight ? x + w / 2 - 1.2 * s : x - w / 2 - 0.8 * s}" y="${y - 2.6 * s}" width="${2 * s}" height="${5.2 * s}" rx="${0.8 * s}" fill="var(--blue)"/>`
+    + `<circle cx="${x - (lensRight ? 2.2 : -2.2) * s}" cy="${y}" r="${1.1 * s}" fill="var(--card)" opacity=".55"/></g>`;
+}
+// runway map: one lane per jump, box on the right, the sensor at its tripod mark;
+// lefts pink with their spot in feet, rights grey
 function runwayMap(items, o = {}) {
   if (!items.length) return "";
-  const box = hasBox(items[0].run), W = 360, pl = 6, pr = box ? 30 : 10, single = items.length === 1;
-  const laneH = single ? 62 : 46, top = 8, H = top + items.length * laneH + 22, fz = single ? 11 : 8.5;
+  const run0 = items[0].run, box = hasBox(run0), setup = SETUPS[run0.setup] || {}, single = items.length === 1;
+  const W = o.W || 360, pl = o.gutter || 8, pr = box ? 22 : 10;
+  const laneH = single ? 64 : o.laneH || 38, top = single ? 4 : o.gutter ? 2 : 6, axisH = 26, H = top + items.length * laneH + axisH;
   let far = 20;
   for (const { run } of items) { for (const c of contactsOf(run)) far = Math.max(far, spotFt(run, c) || 0); if (box && run.res.startMarkFt) far = Math.max(far, run.res.startMarkFt); }
-  far = Math.ceil((far + 3) / 10) * 10;
+  const tripod = box && setup.boxFt ? setup.boxFt : null;
+  if (tripod) far = Math.max(far, tripod);
+  far = Math.ceil((far + 4) / 10) * 10;
   const X = (ft) => (box ? pl + ((far - ft) / far) * (W - pl - pr) : pl + (ft / far) * (W - pl - pr));
-  let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block" role="img" aria-label="Where each left landed">`;
-  // grid every 10 ft
-  for (let f = 0; f <= far; f += 10) s += `<line x1="${X(f)}" x2="${X(f)}" y1="${top}" y2="${H - 22}" stroke="var(--line)" stroke-width="${f % 50 === 0 ? 1.2 : 0.6}"/>${X(f) > 14 ? `<text x="${X(f)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="var(--muted)">${box && f === 0 ? "" : f + "'"}</text>` : ""}`;
-  if (box) s += `<rect x="${X(0)}" y="${top}" width="${pr - 6}" height="${H - 22 - top}" rx="3" fill="var(--purple)" opacity=".18"/><text x="${X(0) + (pr - 6) / 2}" y="${H - 8}" text-anchor="middle" font-size="9" font-weight="800" fill="var(--purple)">BOX</text>`;
+  const y1 = top + items.length * laneH, step = far > 110 ? 20 : 10;
+  let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;font-variant-numeric:tabular-nums" role="img" aria-label="Where each left landed">`;
+  // feet scale
+  s += `<line x1="${pl}" x2="${X(0)}" y1="${y1 + 4}" y2="${y1 + 4}" stroke="var(--line)"/>`;
+  for (let f = 0; f <= far; f += 5) {
+    const major = f % step === 0, x = X(f);
+    s += `<line x1="${x}" x2="${x}" y1="${y1 + 4}" y2="${y1 + (major ? 9 : 6.5)}" stroke="var(--muted)" stroke-opacity="${major ? 0.7 : 0.35}"/>`;
+    if (major && f > 0 && !(tripod && Math.abs(f - tripod) < step / 2)) s += `<text x="${x}" y="${y1 + 19}" text-anchor="middle" font-size="8.5" fill="var(--muted)">${f}'</text>`;
+  }
+  // the box: a slim column at 0 ft
+  if (box) s += `<rect x="${X(0) + 4}" y="${top + 4}" width="5" height="${y1 - top - 4}" rx="1.5" fill="var(--purple)" opacity=".55"/><text x="${X(0) + 6.5}" y="${y1 + 19}" text-anchor="middle" font-size="8" font-weight="700" letter-spacing=".06em" fill="var(--purple)">${setup.pole ? "MARK" : "BOX"}</text>`;
+  // the sensor on its tripod mark, on the scale
+  if (tripod) s += sensorGlyph(X(tripod), y1 + 15, 0.85);
   // mid mark: the average spot of the chosen left
   if (o.mid != null) {
     const xs = []; for (const { run } of items) for (const c of contactsOf(run)) if (c.left && c.out === o.mid) xs.push(spotFt(run, c));
-    if (xs.length) { const m = xs.reduce((a, b) => a + b, 0) / xs.length; s += `<line x1="${X(m)}" x2="${X(m)}" y1="${top - 2}" y2="${H - 22}" stroke="var(--purple)" stroke-width="1.5" stroke-dasharray="4 3"/>`; }
+    if (xs.length) { const m = xs.reduce((a, b) => a + b, 0) / xs.length; s += `<line x1="${X(m)}" x2="${X(m)}" y1="${top}" y2="${y1 + 2}" stroke="var(--purple)" stroke-width="1" stroke-dasharray="3 3" opacity=".8"/>`; }
   }
   items.forEach(({ run, label }, li) => {
-    const y0 = top + li * laneH, yl = y0 + (single ? 34 : 22), cs = contactsOf(run), R = run.res;
-    if (label && !single) s += `<text x="${pl}" y="${y0 + 9}" font-size="9.5" font-weight="700" fill="var(--muted)">${esc(label)}</text>`;
+    const y0 = top + li * laneH, yl = y0 + (single ? 30 : o.gutter ? laneH / 2 - 2 : 23), cs = contactsOf(run), R = run.res, bh = single ? 12 : o.gutter ? 7 : 9;
+    if (label) s += o.gutter ? `<text x="4" y="${yl + 3}" font-size="9" font-weight="600" fill="var(--text)">${esc(label)}</text>`
+      : `<text x="${pl}" y="${y0 + 9}" font-size="9" font-weight="600" fill="var(--muted)">${esc(label)}</text>`;
+    // the run-up: a thin track from the start mark (or first step) to the takeoff
     const xs = cs.map((c) => X(spotFt(run, c))), startX = box && R.startMarkFt != null ? X(R.startMarkFt) : box ? null : X(0);
-    if (cs.length) s += `<line x1="${startX != null ? startX : xs[0]}" x2="${xs[xs.length - 1]}" y1="${yl}" y2="${yl}" stroke="var(--line)" stroke-width="2"/>`;
-    if (startX != null) s += `<path d="M${startX} ${yl - 7} l5 7 l-5 7 l-5 -7z" fill="var(--blue)"/>`;
-    let flip = false;
+    const a = startX != null ? startX : xs[0], b = xs.length ? xs[xs.length - 1] : a;
+    if (a != null) s += `<rect x="${Math.min(a, b)}" y="${yl - bh / 2}" width="${Math.abs(b - a)}" height="${bh}" rx="${bh / 2}" fill="var(--line)" opacity=".55"/>`;
+    if (tripod) s += `<line x1="${X(tripod)}" x2="${Math.min(a, b)}" y1="${yl}" y2="${yl}" stroke="var(--blue)" stroke-opacity=".35" stroke-dasharray="1.5 2.5"/>`;
+    if (startX != null) s += `<line x1="${startX}" x2="${startX}" y1="${yl - bh / 2 - 3}" y2="${yl + bh / 2 + 3}" stroke="var(--blue)" stroke-width="1.6" stroke-linecap="round"/>`
+      + (single ? `<text x="${startX - 5}" y="${yl + 2.8}" text-anchor="end" font-size="7.5" font-weight="700" letter-spacing=".06em" fill="var(--blue)" paint-order="stroke" stroke="var(--card)" stroke-width="3">START</text>` : "");
+    // labels never overlap: a label is skipped (multi) or lifted (single) when it would touch the one before
+    let lastLx = -1e9, lift = false;
     cs.forEach((c, i) => {
       const x = xs[i];
-      if (!c.left) { s += `<circle cx="${x}" cy="${yl}" r="2.8" fill="#9a95b8"/>`; return; }
-      s += c.takeoff ? `<circle cx="${x}" cy="${yl}" r="6" fill="var(--card)" stroke="var(--pink)" stroke-width="3"/>` : `<circle cx="${x}" cy="${yl}" r="4.6" fill="var(--pink)"/>`;
-      // full feet-and-inches when there's room, rounded feet when lefts are close together
-      const ft = spotFt(run, c), gap = Math.min(...cs.map((q, j) => (q.left && j !== i ? Math.abs(xs[j] - x) : 999)));
-      const txt = single && gap > 44 ? ftLabel(ft) : `${Math.round(ft)}'`;
+      if (!c.left) { s += `<circle cx="${x}" cy="${yl}" r="${single ? 1.9 : 1.5}" fill="var(--muted)" opacity=".7"/>`; return; }
+      s += c.takeoff ? `<circle cx="${x}" cy="${yl}" r="${single ? 3.6 : 2.9}" fill="var(--card)" stroke="var(--pink)" stroke-width="1.6"/>`
+        : `<circle cx="${x}" cy="${yl}" r="${single ? 3.1 : 2.5}" fill="var(--pink)"/>`;
+      const ft = spotFt(run, c);
       if (single) {
-        s += `<text x="${x}" y="${yl - 11 - (flip ? 13 : 0)}" text-anchor="middle" font-size="${fz}" font-weight="700" fill="var(--text)">${txt}</text>`;
-        s += `<text x="${x}" y="${yl + 20}" text-anchor="middle" font-size="10" font-weight="800" fill="var(--pink)">${c.takeoff ? "TO" : "L" + c.n}</text>`;
-        flip = !flip;
-      } else s += `<text x="${x}" y="${yl + 15}" text-anchor="middle" font-size="8.5" font-weight="600" fill="var(--muted)">${txt}</text>`;
+        lift = Math.abs(x - lastLx) < 22 ? !lift : false; lastLx = x;
+        s += `<text x="${x}" y="${yl - bh / 2 - 4 - (lift ? 10 : 0)}" text-anchor="middle" font-size="9" font-weight="600" fill="var(--text)">${Math.round(ft)}'</text>`;
+        s += `<text x="${x}" y="${yl + bh / 2 + 11}" text-anchor="middle" font-size="7.5" font-weight="700" letter-spacing=".04em" fill="var(--pink)">${c.takeoff ? "TO" : "L" + c.n}</text>`;
+      } else if (x - lastLx >= 17 || c.takeoff) { lastLx = x; s += `<text x="${x}" y="${o.gutter ? yl - 5 : yl + 12}" text-anchor="middle" font-size="7.5" fill="var(--muted)">${Math.round(ft)}'</text>`; }
     });
   });
   return s + `</svg>`;
 }
+const MAPKEY = () => {
+  const g = (inner, w = 14) => `<svg width="${w}" height="10" viewBox="0 0 ${w} 10" style="display:inline;vertical-align:-1px">${inner}</svg>`;
+  return `<div class="mapkey">${g(sensorGlyph(7, 5, 0.75), 14)} sensor <span>${g(`<line x1="5" x2="5" y1="1" y2="9" stroke="var(--blue)" stroke-width="1.6" stroke-linecap="round"/>`, 10)} start mark</span><span>${g(`<circle cx="5" cy="5" r="3" fill="var(--pink)"/>`, 10)} lefts</span><span>${g(`<circle cx="5" cy="5" r="1.9" fill="var(--muted)" opacity=".7"/>`, 10)} rights</span><span>${g(`<circle cx="5" cy="5" r="3.3" fill="none" stroke="var(--pink)" stroke-width="1.5"/>`, 10)} takeoff</span></div>`;
+};
 // table: one row per jump, one column per left counted back from the takeoff
 function leftsMatrix(list, o = {}) {
   const box = hasBox(list[0]);
@@ -641,8 +670,8 @@ function leftsCardHTML(run) {
   });
   return `<div class="card"><div class="between"><div class="label">Where each left landed</div><div class="small muted">feet from the ${box ? "box" : "start"}</div></div>
     <div style="margin-top:8px">${runwayMap([{ run }])}</div>
-    <div class="small muted" style="margin:2px 0 8px"><span style="color:var(--blue)">◆</span> start mark · <span style="color:var(--pink)">●</span> lefts · <span style="color:#9a95b8">●</span> rights · ◯ takeoff</div>
-    <div class="tw"><table class="lm"><thead><tr><th>Left</th><th>Counted back</th><th>From ${box ? "box" : "start"}</th><th>Stride</th><th>m/s</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${MAPKEY()}
+    <div class="tw"><table class="lm"><thead><tr><th>Left</th><th>Out</th><th>From ${box ? "box" : "start"}</th><th>Stride</th><th>m/s</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="small muted" style="margin-top:6px">Stride = distance from the left before. Each spot is about ±1 ft on its own. Averages over several jumps in Analytics are steadier.</div></div>`;
 }
 
@@ -1148,7 +1177,8 @@ function compareAthletesCard(test) {
     const t = rows.filter((o) => o.toSd != null).sort((x, y) => x.toSd - y.toSd);
     if (t.length > 1) notes.push(`Most consistent takeoff: ${esc(t[0].a.name)} (±${spreadFt(t[0].toSd).slice(1)}).`);
   }
-  h += `<ul class="notes">${notes.map((n) => `<li>${n}</li>`).join("")}</ul><div class="small muted">Tap an athlete to see their numbers above.</div></div>`;
+  h += `<ul class="notes">${notes.map((n) => `<li>${n}</li>`).join("")}</ul><div class="small muted">Tap an athlete to see their numbers above.</div>
+    <button class="btn" style="width:100%;margin-top:10px" data-act="cmp-report" ${sel.length > 1 ? "" : "disabled"}>Print comparison report (PDF)</button></div>`;
   return h;
 }
 
@@ -1273,6 +1303,7 @@ document.addEventListener("click", (e) => {
     case "cap-up": cap.athleteId = id; render(); break;
     case "cap-end": stopNow(); cap.phase = "summary"; render(); window.scrollTo(0, 0); break;
     case "cap-close": cap.session = null; saveSession(); cap.phase = "setup"; go("home"); break;
+    case "cmp-report": { const t = anState.test, ids = (anState.cmp || []).filter((x) => runs.some((r) => r.athleteId === x && testKey(r) === t)); if (ids.length > 1) openCompareReport(t, ids); else toast("Pick at least two athletes to compare."); break; }
     case "session-report": if (cap.session) openSessionReport(cap.session.ids); break;
     case "cap-mode": cap.mode = v; settings.lastMode = v; saveSettings(); render(); break;
     case "cap-target": cap.target = +v; settings.lastTarget = +v; saveSettings(); render(); break;

@@ -60,6 +60,7 @@ h3{font-size:15px;margin:14px 0 6px}
 .lm th,.lm td{white-space:nowrap;padding:6px 7px;font-size:12.5px}.lm .mid{background:var(--tint-strong)}.lm tr.avg td{font-weight:800;color:var(--text)}
 .midbox{display:flex;justify-content:space-between;align-items:center;background:var(--tint);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:6px 0 8px}
 .chip.sm{padding:5px 10px;font-size:12.5px}
+.mapkey{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;font-size:11.5px;color:var(--muted);margin:6px 0 10px}.mapkey span{display:inline-flex;align-items:center;gap:5px}.mapkey svg{width:auto}
 .zone{display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:7px 12px;border-radius:999px;border:1px solid var(--line);font-size:13px;color:var(--muted)}
 .zone i{width:10px;height:10px;border-radius:50%;background:var(--muted);opacity:.5}
 .zone.on{color:var(--text);border-color:var(--pink)}.zone.on i{background:var(--pink);opacity:1;animation:pulse 1s ease-in-out infinite}
@@ -247,6 +248,26 @@ button:focus-visible,.chip:focus-visible,.opt:focus-visible{outline:2px solid va
 .page .kv div{padding:3px 0;border-bottom:1px solid var(--rule)}
 .page .kv div:nth-child(even){text-align:right;font-weight:600}
 .page svg{display:block;width:100%;height:auto}
+.page{--pink:#e0147a;--purple:#7444e8;--blue:#0f8fd6;--text:#1d1838;--muted:#5b5680;--line:#dcd7ee;--card:#fff}
+.page .cdot{display:inline-block;border-radius:50%;margin-right:6px;vertical-align:0}
+.page .crank{display:grid;grid-template-columns:22px 210px 1fr 86px 58px;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid var(--rule)}
+.page .crank:last-child{border-bottom:0}
+.page .crank .n{font-family:var(--display);font-weight:600;font-size:15px;color:var(--ink2);text-align:center}
+.page .crank .nm{font-weight:600;font-size:13px;line-height:1.25}.page .crank .nm small{display:block;font-weight:400;font-size:10.5px;color:var(--ink2);margin-left:15px}
+.page .crank .barbg{height:12px;background:#f1eff8;border-radius:6px;overflow:hidden}.page .crank .barbg i{display:block;height:100%;border-radius:6px}
+.page .crank b{font-family:var(--display);font-weight:600;font-size:17px;text-align:right;letter-spacing:-.3px}.page .crank b small{font-size:10.5px;font-weight:400;color:var(--ink2)}
+.page .crank .gap{font-size:11px;color:var(--ink2);text-align:right;font-variant-numeric:tabular-nums}
+.page table.ctab{width:100%;border-collapse:collapse;table-layout:fixed}
+.page table.ctab th{text-align:right;font-weight:600;color:var(--ink);font-size:11.5px;padding:5px 8px;border-bottom:1.5px solid var(--ink)}
+.page table.ctab th:first-child,.page table.ctab td:first-child{text-align:left}
+.page table.ctab td{text-align:right;padding:3.5px 8px;font-size:11.5px;font-variant-numeric:tabular-nums}
+.page table.ctab td:first-child{color:var(--ink2)}.page table.ctab td .u,.page table.ctab .u{font-size:10px;color:#9a95b8}
+.page table.ctab td.lead{color:var(--acc);font-weight:700}
+.page table.ctab tbody tr:nth-child(even) td{background:#faf9fd}
+.page table.ctab.lefts td,.page table.ctab.lefts th{font-size:10.5px;padding:4px 5px}.page table.ctab.lefts td:first-child{color:var(--ink);font-weight:600}
+.page table.ctab.lefts td small{display:block;font-size:9px;color:#9a95b8}
+.page table.ctab .mid{background:#f3eefe!important}
+.page .rmap{margin:2px 0 8px}
 .page svg text{font-family:var(--ui)}
 @media print{
   @page{size:letter;margin:0}
@@ -1367,47 +1388,76 @@ function finishTag(R) {
   const c = f.change, word = c >= 0.1 ? "Speeding up" : c <= -0.1 ? "Slowing" : "Holding speed";
   return { c, cls: c >= 0.1 ? "up" : c <= -0.1 ? "down" : "flat", text: `${word} into the box`, value: `${c >= 0 ? "+" : "−"}${Math.abs(c).toFixed(2)}`, accel: f.accel };
 }
-// runway map: one lane per jump, box on the right; lefts pink with their spot in feet, rights grey
+// the sensor seen from above: case with the lens facing down the runway (toward the box on the right)
+function sensorGlyph(x, y, s = 1, lensRight = true) {
+  const w = 13 * s, h = 9 * s;
+  return `<g aria-hidden="true"><rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="${2 * s}" fill="var(--text)"/>`
+    + `<rect x="${lensRight ? x + w / 2 - 1.2 * s : x - w / 2 - 0.8 * s}" y="${y - 2.6 * s}" width="${2 * s}" height="${5.2 * s}" rx="${0.8 * s}" fill="var(--blue)"/>`
+    + `<circle cx="${x - (lensRight ? 2.2 : -2.2) * s}" cy="${y}" r="${1.1 * s}" fill="var(--card)" opacity=".55"/></g>`;
+}
+// runway map: one lane per jump, box on the right, the sensor at its tripod mark;
+// lefts pink with their spot in feet, rights grey
 function runwayMap(items, o = {}) {
   if (!items.length) return "";
-  const box = hasBox(items[0].run), W = 360, pl = 6, pr = box ? 30 : 10, single = items.length === 1;
-  const laneH = single ? 62 : 46, top = 8, H = top + items.length * laneH + 22, fz = single ? 11 : 8.5;
+  const run0 = items[0].run, box = hasBox(run0), setup = SETUPS[run0.setup] || {}, single = items.length === 1;
+  const W = o.W || 360, pl = o.gutter || 8, pr = box ? 22 : 10;
+  const laneH = single ? 64 : o.laneH || 38, top = single ? 4 : o.gutter ? 2 : 6, axisH = 26, H = top + items.length * laneH + axisH;
   let far = 20;
   for (const { run } of items) { for (const c of contactsOf(run)) far = Math.max(far, spotFt(run, c) || 0); if (box && run.res.startMarkFt) far = Math.max(far, run.res.startMarkFt); }
-  far = Math.ceil((far + 3) / 10) * 10;
+  const tripod = box && setup.boxFt ? setup.boxFt : null;
+  if (tripod) far = Math.max(far, tripod);
+  far = Math.ceil((far + 4) / 10) * 10;
   const X = (ft) => (box ? pl + ((far - ft) / far) * (W - pl - pr) : pl + (ft / far) * (W - pl - pr));
-  let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block" role="img" aria-label="Where each left landed">`;
-  // grid every 10 ft
-  for (let f = 0; f <= far; f += 10) s += `<line x1="${X(f)}" x2="${X(f)}" y1="${top}" y2="${H - 22}" stroke="var(--line)" stroke-width="${f % 50 === 0 ? 1.2 : 0.6}"/>${X(f) > 14 ? `<text x="${X(f)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="var(--muted)">${box && f === 0 ? "" : f + "'"}</text>` : ""}`;
-  if (box) s += `<rect x="${X(0)}" y="${top}" width="${pr - 6}" height="${H - 22 - top}" rx="3" fill="var(--purple)" opacity=".18"/><text x="${X(0) + (pr - 6) / 2}" y="${H - 8}" text-anchor="middle" font-size="9" font-weight="800" fill="var(--purple)">BOX</text>`;
+  const y1 = top + items.length * laneH, step = far > 110 ? 20 : 10;
+  let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;font-variant-numeric:tabular-nums" role="img" aria-label="Where each left landed">`;
+  // feet scale
+  s += `<line x1="${pl}" x2="${X(0)}" y1="${y1 + 4}" y2="${y1 + 4}" stroke="var(--line)"/>`;
+  for (let f = 0; f <= far; f += 5) {
+    const major = f % step === 0, x = X(f);
+    s += `<line x1="${x}" x2="${x}" y1="${y1 + 4}" y2="${y1 + (major ? 9 : 6.5)}" stroke="var(--muted)" stroke-opacity="${major ? 0.7 : 0.35}"/>`;
+    if (major && f > 0 && !(tripod && Math.abs(f - tripod) < step / 2)) s += `<text x="${x}" y="${y1 + 19}" text-anchor="middle" font-size="8.5" fill="var(--muted)">${f}'</text>`;
+  }
+  // the box: a slim column at 0 ft
+  if (box) s += `<rect x="${X(0) + 4}" y="${top + 4}" width="5" height="${y1 - top - 4}" rx="1.5" fill="var(--purple)" opacity=".55"/><text x="${X(0) + 6.5}" y="${y1 + 19}" text-anchor="middle" font-size="8" font-weight="700" letter-spacing=".06em" fill="var(--purple)">${setup.pole ? "MARK" : "BOX"}</text>`;
+  // the sensor on its tripod mark, on the scale
+  if (tripod) s += sensorGlyph(X(tripod), y1 + 15, 0.85);
   // mid mark: the average spot of the chosen left
   if (o.mid != null) {
     const xs = []; for (const { run } of items) for (const c of contactsOf(run)) if (c.left && c.out === o.mid) xs.push(spotFt(run, c));
-    if (xs.length) { const m = xs.reduce((a, b) => a + b, 0) / xs.length; s += `<line x1="${X(m)}" x2="${X(m)}" y1="${top - 2}" y2="${H - 22}" stroke="var(--purple)" stroke-width="1.5" stroke-dasharray="4 3"/>`; }
+    if (xs.length) { const m = xs.reduce((a, b) => a + b, 0) / xs.length; s += `<line x1="${X(m)}" x2="${X(m)}" y1="${top}" y2="${y1 + 2}" stroke="var(--purple)" stroke-width="1" stroke-dasharray="3 3" opacity=".8"/>`; }
   }
   items.forEach(({ run, label }, li) => {
-    const y0 = top + li * laneH, yl = y0 + (single ? 34 : 22), cs = contactsOf(run), R = run.res;
-    if (label && !single) s += `<text x="${pl}" y="${y0 + 9}" font-size="9.5" font-weight="700" fill="var(--muted)">${esc(label)}</text>`;
+    const y0 = top + li * laneH, yl = y0 + (single ? 30 : o.gutter ? laneH / 2 - 2 : 23), cs = contactsOf(run), R = run.res, bh = single ? 12 : o.gutter ? 7 : 9;
+    if (label) s += o.gutter ? `<text x="4" y="${yl + 3}" font-size="9" font-weight="600" fill="var(--text)">${esc(label)}</text>`
+      : `<text x="${pl}" y="${y0 + 9}" font-size="9" font-weight="600" fill="var(--muted)">${esc(label)}</text>`;
+    // the run-up: a thin track from the start mark (or first step) to the takeoff
     const xs = cs.map((c) => X(spotFt(run, c))), startX = box && R.startMarkFt != null ? X(R.startMarkFt) : box ? null : X(0);
-    if (cs.length) s += `<line x1="${startX != null ? startX : xs[0]}" x2="${xs[xs.length - 1]}" y1="${yl}" y2="${yl}" stroke="var(--line)" stroke-width="2"/>`;
-    if (startX != null) s += `<path d="M${startX} ${yl - 7} l5 7 l-5 7 l-5 -7z" fill="var(--blue)"/>`;
-    let flip = false;
+    const a = startX != null ? startX : xs[0], b = xs.length ? xs[xs.length - 1] : a;
+    if (a != null) s += `<rect x="${Math.min(a, b)}" y="${yl - bh / 2}" width="${Math.abs(b - a)}" height="${bh}" rx="${bh / 2}" fill="var(--line)" opacity=".55"/>`;
+    if (tripod) s += `<line x1="${X(tripod)}" x2="${Math.min(a, b)}" y1="${yl}" y2="${yl}" stroke="var(--blue)" stroke-opacity=".35" stroke-dasharray="1.5 2.5"/>`;
+    if (startX != null) s += `<line x1="${startX}" x2="${startX}" y1="${yl - bh / 2 - 3}" y2="${yl + bh / 2 + 3}" stroke="var(--blue)" stroke-width="1.6" stroke-linecap="round"/>`
+      + (single ? `<text x="${startX - 5}" y="${yl + 2.8}" text-anchor="end" font-size="7.5" font-weight="700" letter-spacing=".06em" fill="var(--blue)" paint-order="stroke" stroke="var(--card)" stroke-width="3">START</text>` : "");
+    // labels never overlap: a label is skipped (multi) or lifted (single) when it would touch the one before
+    let lastLx = -1e9, lift = false;
     cs.forEach((c, i) => {
       const x = xs[i];
-      if (!c.left) { s += `<circle cx="${x}" cy="${yl}" r="2.8" fill="#9a95b8"/>`; return; }
-      s += c.takeoff ? `<circle cx="${x}" cy="${yl}" r="6" fill="var(--card)" stroke="var(--pink)" stroke-width="3"/>` : `<circle cx="${x}" cy="${yl}" r="4.6" fill="var(--pink)"/>`;
-      // full feet-and-inches when there's room, rounded feet when lefts are close together
-      const ft = spotFt(run, c), gap = Math.min(...cs.map((q, j) => (q.left && j !== i ? Math.abs(xs[j] - x) : 999)));
-      const txt = single && gap > 44 ? ftLabel(ft) : `${Math.round(ft)}'`;
+      if (!c.left) { s += `<circle cx="${x}" cy="${yl}" r="${single ? 1.9 : 1.5}" fill="var(--muted)" opacity=".7"/>`; return; }
+      s += c.takeoff ? `<circle cx="${x}" cy="${yl}" r="${single ? 3.6 : 2.9}" fill="var(--card)" stroke="var(--pink)" stroke-width="1.6"/>`
+        : `<circle cx="${x}" cy="${yl}" r="${single ? 3.1 : 2.5}" fill="var(--pink)"/>`;
+      const ft = spotFt(run, c);
       if (single) {
-        s += `<text x="${x}" y="${yl - 11 - (flip ? 13 : 0)}" text-anchor="middle" font-size="${fz}" font-weight="700" fill="var(--text)">${txt}</text>`;
-        s += `<text x="${x}" y="${yl + 20}" text-anchor="middle" font-size="10" font-weight="800" fill="var(--pink)">${c.takeoff ? "TO" : "L" + c.n}</text>`;
-        flip = !flip;
-      } else s += `<text x="${x}" y="${yl + 15}" text-anchor="middle" font-size="8.5" font-weight="600" fill="var(--muted)">${txt}</text>`;
+        lift = Math.abs(x - lastLx) < 22 ? !lift : false; lastLx = x;
+        s += `<text x="${x}" y="${yl - bh / 2 - 4 - (lift ? 10 : 0)}" text-anchor="middle" font-size="9" font-weight="600" fill="var(--text)">${Math.round(ft)}'</text>`;
+        s += `<text x="${x}" y="${yl + bh / 2 + 11}" text-anchor="middle" font-size="7.5" font-weight="700" letter-spacing=".04em" fill="var(--pink)">${c.takeoff ? "TO" : "L" + c.n}</text>`;
+      } else if (x - lastLx >= 17 || c.takeoff) { lastLx = x; s += `<text x="${x}" y="${o.gutter ? yl - 5 : yl + 12}" text-anchor="middle" font-size="7.5" fill="var(--muted)">${Math.round(ft)}'</text>`; }
     });
   });
   return s + `</svg>`;
 }
+const MAPKEY = () => {
+  const g = (inner, w = 14) => `<svg width="${w}" height="10" viewBox="0 0 ${w} 10" style="display:inline;vertical-align:-1px">${inner}</svg>`;
+  return `<div class="mapkey">${g(sensorGlyph(7, 5, 0.75), 14)} sensor <span>${g(`<line x1="5" x2="5" y1="1" y2="9" stroke="var(--blue)" stroke-width="1.6" stroke-linecap="round"/>`, 10)} start mark</span><span>${g(`<circle cx="5" cy="5" r="3" fill="var(--pink)"/>`, 10)} lefts</span><span>${g(`<circle cx="5" cy="5" r="1.9" fill="var(--muted)" opacity=".7"/>`, 10)} rights</span><span>${g(`<circle cx="5" cy="5" r="3.3" fill="none" stroke="var(--pink)" stroke-width="1.5"/>`, 10)} takeoff</span></div>`;
+};
 // table: one row per jump, one column per left counted back from the takeoff
 function leftsMatrix(list, o = {}) {
   const box = hasBox(list[0]);
@@ -1435,8 +1485,8 @@ function leftsCardHTML(run) {
   });
   return `<div class="card"><div class="between"><div class="label">Where each left landed</div><div class="small muted">feet from the ${box ? "box" : "start"}</div></div>
     <div style="margin-top:8px">${runwayMap([{ run }])}</div>
-    <div class="small muted" style="margin:2px 0 8px"><span style="color:var(--blue)">◆</span> start mark · <span style="color:var(--pink)">●</span> lefts · <span style="color:#9a95b8">●</span> rights · ◯ takeoff</div>
-    <div class="tw"><table class="lm"><thead><tr><th>Left</th><th>Counted back</th><th>From ${box ? "box" : "start"}</th><th>Stride</th><th>m/s</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${MAPKEY()}
+    <div class="tw"><table class="lm"><thead><tr><th>Left</th><th>Out</th><th>From ${box ? "box" : "start"}</th><th>Stride</th><th>m/s</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="small muted" style="margin-top:6px">Stride = distance from the left before. Each spot is about ±1 ft on its own. Averages over several jumps in Analytics are steadier.</div></div>`;
 }
 
@@ -1942,7 +1992,8 @@ function compareAthletesCard(test) {
     const t = rows.filter((o) => o.toSd != null).sort((x, y) => x.toSd - y.toSd);
     if (t.length > 1) notes.push(`Most consistent takeoff: ${esc(t[0].a.name)} (±${spreadFt(t[0].toSd).slice(1)}).`);
   }
-  h += `<ul class="notes">${notes.map((n) => `<li>${n}</li>`).join("")}</ul><div class="small muted">Tap an athlete to see their numbers above.</div></div>`;
+  h += `<ul class="notes">${notes.map((n) => `<li>${n}</li>`).join("")}</ul><div class="small muted">Tap an athlete to see their numbers above.</div>
+    <button class="btn" style="width:100%;margin-top:10px" data-act="cmp-report" ${sel.length > 1 ? "" : "disabled"}>Print comparison report (PDF)</button></div>`;
   return h;
 }
 
@@ -2067,6 +2118,7 @@ document.addEventListener("click", (e) => {
     case "cap-up": cap.athleteId = id; render(); break;
     case "cap-end": stopNow(); cap.phase = "summary"; render(); window.scrollTo(0, 0); break;
     case "cap-close": cap.session = null; saveSession(); cap.phase = "setup"; go("home"); break;
+    case "cmp-report": { const t = anState.test, ids = (anState.cmp || []).filter((x) => runs.some((r) => r.athleteId === x && testKey(r) === t)); if (ids.length > 1) openCompareReport(t, ids); else toast("Pick at least two athletes to compare."); break; }
     case "session-report": if (cap.session) openSessionReport(cap.session.ids); break;
     case "cap-mode": cap.mode = v; settings.lastMode = v; saveSettings(); render(); break;
     case "cap-target": cap.target = +v; settings.lastTarget = +v; saveSettings(); render(); break;
@@ -2464,15 +2516,15 @@ function vaultChartSVG(run, steps) {
       const yb = Y(0);
       s += `<line x1="${pl}" x2="${W - pr}" y1="${yb}" y2="${yb}" stroke="#8e89ad" stroke-width="1"/>`;
       // rights: small grey dots on the line, so the step length between feet is visible
-      for (const p of steps) if (!p.left) s += `<circle cx="${X(-p.ft)}" cy="${Y(p.speed)}" r="3.6" fill="#b9b4d2" stroke="#fff" stroke-width="1"/>`;
+      for (const p of steps) if (!p.left) s += `<circle cx="${X(-p.ft)}" cy="${Y(p.speed)}" r="2.4" fill="#aaa5c6"/>`;
       lefts.forEach((p, i) => {
         const x = X(-p.ft), y = Y(p.speed), ty = yb + 8 + row[i] * (tagH + 4);
-        s += `<line x1="${x}" x2="${x}" y1="${y + 6}" y2="${ty}" stroke="${ACC}" stroke-opacity=".35" stroke-dasharray="2 3"/>`;
-        s += `<circle cx="${x}" cy="${y}" r="5.5" fill="${ACC}" stroke="#fff" stroke-width="1.5"/>`;
-        s += `<text x="${x}" y="${y - 10}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${INK}">${f2(p.speed)}</text>`;
-        s += `<rect x="${x - 19}" y="${ty}" width="38" height="${tagH}" rx="6" fill="#fff" stroke="${ACC}" stroke-opacity=".55"/>`;
-        s += `<text x="${x}" y="${ty + 12}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${ACC}">${p.takeoff ? "TO" : "L" + p.num}</text>`;
-        s += `<text x="${x}" y="${ty + 25}" text-anchor="middle" font-size="10" font-weight="600" fill="${INK}">${Math.round(p.spot)}'</text>`;
+        s += `<line x1="${x}" x2="${x}" y1="${y + 5}" y2="${yb}" stroke="${ACC}" stroke-opacity=".28" stroke-width="1"/>`;
+        s += `<line x1="${x}" x2="${x}" y1="${yb}" y2="${yb + 4}" stroke="${ACC}" stroke-width="1.4"/>`;
+        s += p.takeoff ? `<circle cx="${x}" cy="${y}" r="4" fill="#fff" stroke="${ACC}" stroke-width="1.8"/>` : `<circle cx="${x}" cy="${y}" r="3.6" fill="${ACC}" stroke="#fff" stroke-width="1.2"/>`;
+        s += `<text x="${x}" y="${y - 9}" text-anchor="middle" font-size="10" font-weight="600" fill="${INK}">${f2(p.speed)}</text>`;
+        s += `<text x="${x}" y="${ty + 9}" text-anchor="middle" font-size="9.5" font-weight="700" letter-spacing=".4" fill="${ACC}">${p.takeoff ? "TO" : "L" + p.num}</text>`;
+        s += `<text x="${x}" y="${ty + 22}" text-anchor="middle" font-size="10" fill="${INK}">${Math.round(p.spot)}'</text>`;
       });
       return s;
     } });
@@ -2616,6 +2668,170 @@ function openSessionReport(ids) {
   if (!list.length) { toast("No saved runs in this session."); return; }
   const el = $("#report");
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + sessionReport(list);
+  el.classList.remove("hidden"); el.scrollTop = 0;
+  const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
+  fit(); window.addEventListener("resize", fit, { once: true });
+}
+
+// ---------- athlete comparison report: the athletes picked in Analytics, side by side for one test ----------
+const CMP_COLORS = [ACC, ACC2, ACC3, "#e08a00"];
+function compareStats(aid, test) {
+  const isS = test.startsWith("sprint"), km = keyMetric(test);
+  const tr = runs.filter((r) => r.athleteId === aid && testKey(r) === test && !r.res.error).sort((a, b) => a.ts - b.ts);
+  const vals = tr.map(km.pick).filter((v) => v != null && isFinite(v));
+  const o = { aid, name: athleteById(aid).name, tr, n: tr.length, best: bestOf(tr, km.pick, "high"), avg: avgOf(vals), sd: sdOf(vals), first: tr[0], last: tr[tr.length - 1] };
+  o.top = bestOf(tr, (r) => r.res.top.speed, "high");
+  if (isS) {
+    o.fly = bestOf(tr, (r) => r.res.fly10 && r.res.fly10.time, "low"); o.time = bestOf(tr, (r) => r.res.time, "low");
+    o.toTop = avgOf(tr.map((r) => r.res.top.dist).filter(isFinite));
+    const st = tr.filter((r) => r.res.stride); o.freq = avgOf(st.map((r) => r.res.stride.freq)); o.len = avgOf(st.map((r) => r.res.stride.length));
+    const pw = tr.map((r) => r.res.fv && (r.res.fv.P0abs || null)).filter(Boolean); o.power = pw.length ? Math.max(...pw) : null;
+  } else {
+    const sTop = sprintTopFor(aid); o.sprintTop = sTop ? sTop.v : null; o.carry = sTop && o.avg ? o.avg / sTop.v : null;
+    o.lefts = modeOf(tr.map((r) => r.res.steps.lefts).filter(Boolean));
+    const TO = tr.map((r) => r.res.takeoff.outFt).filter((x) => x != null), SM = tr.map((r) => r.res.startMarkFt).filter((x) => x != null);
+    o.to = avgOf(TO); o.toSd = sdOf(TO); o.sm = avgOf(SM); o.smSd = sdOf(SM);
+    const fz = tr.map((r) => r.res.finish && r.res.finish.change).filter((x) => x != null && isFinite(x)); o.into = avgOf(fz); o.slowed = fz.filter((x) => x <= -0.1).length; o.intoN = fz.length;
+    // average spot of each left, counted back from the takeoff
+    o.leftAvg = {};
+    for (let k = 0; k <= 9; k++) { const xs = []; for (const r of tr) { const c = contactsOf(r).find((c) => c.left && c.out === k); if (c) xs.push(spotFt(r, c)); } if (xs.length) o.leftAvg[k] = { ft: avgOf(xs), sd: sdOf(xs), n: xs.length }; }
+  }
+  return o;
+}
+function compareReport(test, ids) {
+  const isS = test.startsWith("sprint"), km = keyMetric(test), setup = isS ? null : test.split("-")[1];
+  const A = ids.map((id) => compareStats(id, test)).filter((o) => o.best).sort((x, y) => y.best.v - x.best.v);
+  const col = {}; A.forEach((o, i) => (col[o.aid] = CMP_COLORS[i % CMP_COLORS.length]));
+  const all = A.flatMap((o) => o.tr), t0 = Math.min(...all.map((r) => r.ts)), t1 = Math.max(...all.map((r) => r.ts));
+  const dfmt = (ts) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const head = `<div class="rhead"><span>LiDAR SENSOR</span><span>ATHLETE COMPARISON</span></div>`;
+  const dot = (aid, s = 9) => `<span class="cdot" style="width:${s}px;height:${s}px;background:${col[aid]}"></span>`;
+  const lead = A[0], lastA = A[A.length - 1], firsts = A.map((o) => o.name.split(" ")[0]);
+  const short = (o) => { const f = o.name.split(" ")[0]; return firsts.filter((x) => x === f).length > 1 ? o.name : f; };
+  const steady = A.filter((o) => o.sd != null).sort((x, y) => x.sd - y.sd)[0];
+  const m = (k, v, u, sub, cls) => `<div class="m ${cls || ""}"><div class="k">${k}</div><div class="v">${v}${u ? `<small>${u}</small>` : ""}</div>${sub ? `<div class="k" style="margin-top:2px">${sub}</div>` : ""}</div>`;
+  const label = isS ? "Top speed" : "Last 5 m into takeoff";
+  // ranking: bars start at a floor below the slowest so the gaps are visible, value and gap to the leader on the right
+  const lo = Math.floor((lastA.best.v - 0.3) * 10) / 10, hi = lead.best.v;
+  const rank = A.map((o, i) => `<div class="crank"><span class="n">${i + 1}</span><span class="nm">${dot(o.aid)}${esc(o.name)}<small>${o.n} run${o.n > 1 ? "s" : ""} · avg ${f2(o.avg)} m/s</small></span>
+      <span class="barbg"><i style="width:${(8 + 92 * ((o.best.v - lo) / Math.max(0.01, hi - lo))).toFixed(1)}%;background:${col[o.aid]}"></i></span>
+      <b>${f2(o.best.v)}<small> m/s</small></b><span class="gap">${i ? signed(o.best.v - lead.best.v) : "leader"}</span></div>`).join("");
+  // trend: best per day, one line per athlete
+  const days = [...new Set(all.map((r) => dayKey(r.ts)))].sort(), dx = (k) => (new Date(k).getTime() - new Date(days[0]).getTime()) / 864e5, xEnd = Math.max(1, dx(days[days.length - 1]));
+  let ylo = 1e9, yhi = -1e9; const series = [], dots = [];
+  for (const o of A) {
+    const by = bestPerDay(o.tr, km.pick), ds = Object.keys(by).sort(), X = ds.map(dx), Y = ds.map((d) => by[d].v);
+    Y.forEach((y) => { ylo = Math.min(ylo, y); yhi = Math.max(yhi, y); });
+    series.push({ x: X, y: Y, color: col[o.aid], w: 2.2 }); X.forEach((x, j) => dots.push({ x, y: Y[j], r: 3.4, fill: "#fff", stroke: col[o.aid], sw: 1.8 }));
+  }
+  const pad = Math.max(0.1, (yhi - ylo) * 0.2), yt = niceTicks(ylo - pad, yhi + pad, 5);
+  const xt = []; { const n = Math.min(6, days.length); for (let i = 0; i < n; i++) xt.push(n === 1 ? 0 : (xEnd * i) / (n - 1)); }
+  const trend = svgChart({ aria: "Best per day", w: 730, h: 142, pad: [44, 14, 10, 34], x0: -0.4, x1: xEnd + 0.4, y0: yt[0], y1: yt[yt.length - 1], font: 11, textColor: INK2, gridColor: "#efecf6",
+    xt, xfmt: (t) => new Date(new Date(days[0]).getTime() + t * 864e5 + 12 * 36e5).toLocaleDateString([], { month: "short", day: "numeric" }), yt, yfmt: (t) => t.toFixed(1), yl: "m/s", series, dots });
+  const lg = legend(A.map((o) => [SW_LINE(col[o.aid], 2.5), esc(o.name)]));
+  // the written takeaways
+  const notes = [];
+  if (A.length > 1) notes.push(`${B(esc(lead.name))} has the best ${km.label}: ${B(f2(lead.best.v) + " m/s")}${isS ? ` (${f1(mph(lead.best.v))} mph)` : ""}, ${f2(lead.best.v - A[1].best.v)} m/s ahead of ${esc(A[1].name)}.`);
+  if (steady && A.length > 1) notes.push(`Most repeatable: ${B(esc(steady.name))}, whose ${km.label} varies by only ±${f2(steady.sd)} m/s from run to run.`);
+  const imp = A.map((o) => { const by = bestPerDay(o.tr, km.pick), ds = Object.keys(by).sort(); return ds.length > 1 ? { o, d: by[ds[ds.length - 1]].v - by[ds[0]].v } : null; }).filter(Boolean).sort((x, y) => y.d - x.d);
+  if (imp.length && imp[0].d > 0.02) notes.push(`Biggest gain over this period: ${B(esc(imp[0].o.name))}, ${signed(imp[0].d)} m/s from first to latest session.`);
+  if (isS) {
+    const f = A.filter((o) => o.fly).sort((x, y) => x.fly.v - y.fly.v); if (f.length > 1) notes.push(`Fastest flying 10 m: ${B(esc(f[0].name))} in ${f2(f[0].fly.v)} s.`);
+    const st = A.filter((o) => o.freq); if (st.length > 1) { const fq = st.slice().sort((x, y) => y.freq - x.freq)[0], ln = st.slice().sort((x, y) => y.len - x.len)[0]; notes.push(fq.aid === ln.aid ? `${esc(fq.name)} has both the quickest steps and the longest stride at top speed.` : `Different routes to speed: ${esc(fq.name)} has the quickest step rate (${f2(fq.freq)}/s), ${esc(ln.name)} the longest step (${f2(ln.len)} m).`); }
+  } else {
+    const c = A.filter((o) => o.carry).sort((x, y) => y.carry - x.carry); if (c.length > 1) notes.push(`${B(esc(c[0].name))} carries the most sprint speed to the plant (${Math.round(c[0].carry * 100)}%); ${esc(c[c.length - 1].name)} the least (${Math.round(c[c.length - 1].carry * 100)}%).`);
+    const t = A.filter((o) => o.toSd != null).sort((x, y) => x.toSd - y.toSd); if (t.length > 1) notes.push(`Most consistent takeoff: ${B(esc(t[0].name))} (${spreadFt(t[0].toSd)}). Least: ${esc(t[t.length - 1].name)} (${spreadFt(t[t.length - 1].toSd)}).`);
+    const sl = A.filter((o) => o.intoN && o.slowed / o.intoN >= 0.5); if (sl.length) notes.push(`Slowing into the box on most jumps: ${sl.map((o) => esc(o.name)).join(", ")}. That speed is lost right where it matters.`);
+  }
+  const p1 = `<div class="page">${head}
+    <div class="box btop">${brandBlock(`Athlete comparison report<br>TF03 LiDAR · 1000 Hz · <b style="color:${INK}">${UNC}</b>`)}
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:12px;gap:12px;flex-wrap:wrap">
+        <div><div class="eyebrow">COMPARISON · ${testName(test).toUpperCase()}</div><div class="who">${A.map((o) => esc(o.name)).join(` <span style="color:${INK2};font-weight:400;font-size:18px">vs</span> `)}</div></div>
+        <div style="color:${INK2};font-size:13px;text-align:right">${dfmt(t0)}${dayKey(t0) !== dayKey(t1) ? ` – ${dfmt(t1)}` : ""}<br>${all.length} runs · ${days.length} session${days.length > 1 ? "s" : ""}</div></div>
+      <div class="metrics" style="grid-template-columns:1.35fr 1fr 1fr 1fr">
+        <div class="m hero" style="grid-row:auto"><div class="k">Best ${km.label}</div><div class="v" style="font-size:40px">${f2(lead.best.v)}<small style="font-size:16px">m/s</small></div><div class="k">${dot(lead.aid, 8)} ${esc(lead.name)} · ${dfmt(lead.best.r.ts)}</div></div>
+        ${m("Gap first to last", A.length > 1 ? f2(lead.best.v - lastA.best.v) : "—", "m/s", A.length > 1 ? `${esc(short(lastA))} to ${esc(short(lead))}` : "", "")}
+        ${m("Most repeatable", steady ? `<span style="font-size:${steady.name.length > 12 ? 17 : 22}px">${esc(steady.name)}</span>` : "—", "", steady ? `±${f2(steady.sd)} m/s run to run` : "needs 2+ runs each", "hl")}
+        ${isS ? m("Fastest fly 10 m", (() => { const f = A.filter((o) => o.fly).sort((x, y) => x.fly.v - y.fly.v)[0]; return f ? f2(f.fly.v) : "—"; })(), "s", (() => { const f = A.filter((o) => o.fly).sort((x, y) => x.fly.v - y.fly.v)[0]; return f ? esc(f.name) : ""; })())
+          : m("Best carry", (() => { const c = A.filter((o) => o.carry).sort((x, y) => y.carry - x.carry)[0]; return c ? Math.round(c.carry * 100) : "—"; })(), "%", (() => { const c = A.filter((o) => o.carry).sort((x, y) => y.carry - x.carry)[0]; return c ? `${esc(c.name)} · of sprint top speed` : "run a sprint test"; })())}
+      </div></div>
+    <div class="box"><div class="between" style="display:flex;justify-content:space-between;align-items:baseline"><h4>Ranking · best ${km.label}</h4><span style="color:${INK2};font-size:11px">gap to the leader in m/s</span></div>${rank}</div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Best ${km.label} per session</h4><span style="color:${INK2};font-size:11px">one point per athlete per day</span></div>${trend}${lg}</div>
+    <div class="box"><h4>Key takeaways</h4><ul class="sum">${notes.slice(0, 4).map((n) => `<li>${n}</li>`).join("")}</ul></div>
+    ${footer(1, 2)}</div>`;
+
+  // ---- page 2: every number side by side, and the speed curves of each athlete's best run
+  const rowsDef = isS ? [
+    ["Best top speed", (o) => o.best.v, (v) => f2(v), "m/s", "high"],
+    ["Average top speed", (o) => o.avg, (v) => f2(v), "m/s", "high"],
+    ["Top speed in mph", (o) => mph(o.best.v), (v) => f1(v), "mph", "high"],
+    ["Run to run spread", (o) => o.sd, (v) => "±" + f2(v), "m/s", "low"],
+    ["Fastest flying 10 m", (o) => o.fly && o.fly.v, (v) => f2(v), "s", "low"],
+    [`Best ${test.split("-")[1]} m time`, (o) => o.time && o.time.v, (v) => f2(v), "s", "low"],
+    ["Distance to top speed", (o) => o.toTop, (v) => f1(v), "m", null],
+    ["Step rate at top speed", (o) => o.freq, (v) => f2(v), "/s", "high"],
+    ["Step length at top speed", (o) => o.len, (v) => f2(v), "m", "high"],
+    ["Peak power", (o) => o.power, (v) => Math.round(v), "W", "high"],
+    ["Runs", (o) => o.n, (v) => v, "", null],
+  ] : [
+    ["Best last 5 m", (o) => o.best.v, (v) => f2(v), "m/s", "high"],
+    ["Average last 5 m", (o) => o.avg, (v) => f2(v), "m/s", "high"],
+    ["Run to run spread", (o) => o.sd, (v) => "±" + f2(v), "m/s", "low"],
+    ["Best top speed", (o) => o.top && o.top.v, (v) => f2(v), "m/s", "high"],
+    ["Carry (avg last 5 m ÷ sprint top)", (o) => o.carry, (v) => Math.round(v * 100) + "%", "", "high"],
+    ["Into the box (avg change)", (o) => o.into, (v) => signed(v), "m/s", "high"],
+    ["Lefts (most often)", (o) => o.lefts, (v) => v, "", null],
+    ["Takeoff from the box", (o) => o.to, (v) => ftLabel(v), "", null],
+    ["Takeoff spread", (o) => o.toSd, (v) => spreadFt(v), "", "low"],
+  ];
+  const tbl = `<table class="ctab"><colgroup><col style="width:${A.length > 3 ? 28 : 34}%">${A.map(() => "<col>").join("")}</colgroup><thead><tr><th></th>${A.map((o) => `<th>${dot(o.aid, 8)}${esc(o.name)}</th>`).join("")}</tr></thead><tbody>${rowsDef.map(([k, get, fmt, u, better]) => {
+    const vs = A.map((o) => { const v = get(o); return v == null || !isFinite(v) ? null : v; }), ok = vs.filter((v) => v != null);
+    // compare what's printed: a tie is pink for everyone in it, and nothing is pink if they're all the same
+    const shown = vs.map((v) => (v == null ? null : String(fmt(v)))), bestV = better && ok.length > 1 ? String(fmt(better === "high" ? Math.max(...ok) : Math.min(...ok))) : null;
+    const allSame = new Set(shown.filter((x) => x != null)).size < 2;
+    return `<tr><td>${k}${u ? ` <span class="u">${u}</span>` : ""}</td>${vs.map((v, i) => `<td class="${!allSame && shown[i] != null && shown[i] === bestV ? "lead" : ""}">${v == null ? "–" : fmt(v)}</td>`).join("")}</tr>`;
+  }).join("")}</tbody></table>`;
+  // each athlete's best run
+  const cs = [];
+  for (const o of A) {
+    const b = o.best.r, c = b.res.curve;
+    if (isS) { let k = c.d.findIndex((x) => x > b.target); if (k < 0) k = c.d.length; const k0 = Math.max(0, c.t.findIndex((t) => t >= 0)); cs.push({ x: c.d.slice(k0, k), y: c.v.slice(k0, k), color: col[o.aid], w: 2.2 }); }
+    else { const xs = c.d.map((x) => (x - b.res.takeoff.dist) / FT); let k = xs.findIndex((x) => x > 0); if (k < 0) k = xs.length; cs.push({ x: xs.slice(0, k), y: c.v.slice(0, k), color: col[o.aid], w: 2.2 }); }
+  }
+  const cymax = isS ? Math.ceil((Math.max(...cs.map((s) => Math.max(...s.y))) + 0.3) * 2) / 2 : Math.ceil(Math.max(...cs.map((s) => Math.max(...s.y))) + 0.8);
+  const cymin = isS ? Math.floor((Math.min(...cs.map((s) => { const k = s.x.findIndex((x) => x >= 10); return k < 0 ? s.y[0] : s.y[k]; })) - 0.3) * 2) / 2 : 0;
+  const cxa = isS ? 10 : Math.max(-140, Math.floor(Math.min(...cs.map((s) => s.x[0])) / 10) * 10), cxb = isS ? Math.max(...A.map((o) => o.best.r.target)) : 0;
+  const curves = svgChart({ aria: "Best runs compared", w: 730, h: isS ? 290 : 128, pad: [44, 14, 10, 34], x0: cxa, x1: cxb, y0: cymin, y1: cymax, font: 11, textColor: INK2, gridColor: "#efecf6",
+    xt: niceTicks(cxa, cxb, 10), xfmt: (t) => (isS ? `${t} m` : t === 0 ? "TO" : `${Math.abs(t)}'`), yt: niceTicks(cymin, cymax, 5), yfmt: (t) => (isS ? t.toFixed(1) : t), yl: "m/s", xl: isS ? "Distance from the start" : "Feet before the takeoff",
+    shades: isS ? [] : [{ a: -5 / FT, b: 0, color: ACC2, op: 0.1 }], series: cs });
+  const clg = legend(A.map((o) => [SW_LINE(col[o.aid], 2.5), `${esc(o.name)} · ${dfmt(o.best.r.ts)}`]));
+  // vault: where each athlete's lefts land on average
+  let leftsBox = "";
+  if (!isS) {
+    const items = A.map((o) => ({ label: o.name, run: { mode: "vault", setup, res: { startMarkFt: o.sm, steps: { lefts: o.lefts }, contacts: Object.entries(o.leftAvg).map(([k, v]) => ({ left: true, out: +k, takeoff: +k === 0, n: null, boxFt: v.ft })).sort((a, b) => b.out - a.out) } } }));
+    const maxOut = Math.max(0, ...A.map((o) => Math.max(0, ...Object.keys(o.leftAvg).map(Number))));
+    const cols = []; for (let k = 0; k <= Math.min(maxOut, 8); k++) cols.push(k);
+    leftsBox = `<div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Where the lefts land · average of every jump</h4><span style="color:${INK2};font-size:11px">feet from the ${SETUPS[setup] && SETUPS[setup].pole ? "box mark" : "box"}</span></div>
+      <div class="rmap">${runwayMap(items, { mid: settings.midOut, W: 580, laneH: 21, gutter: 92 })}</div>
+      <table class="ctab lefts"><colgroup><col style="width:17%"><col style="width:9%">${cols.map(() => "<col>").join("")}</colgroup><thead><tr><th></th><th>Start</th>${cols.map((k) => `<th class="${k === settings.midOut ? "mid" : ""}">${k === 0 ? "TO" : k + " out"}</th>`).join("")}</tr></thead><tbody>${A.map((o) => `<tr><td>${dot(o.aid, 8)}${esc(o.name)}</td><td>${o.sm != null ? ftLabel(o.sm) : "–"}</td>${cols.map((k) => { const v = o.leftAvg[k]; return `<td class="${k === settings.midOut ? "mid" : ""}">${v ? ftLabel(v.ft) + (v.sd != null ? `<small>${spreadFt(v.sd)}</small>` : "") : "–"}</td>`; }).join("")}</tr>`).join("")}</tbody></table>
+      <div style="font-size:10px;color:${INK2};margin-top:4px">Dashed line: the mid mark (${settings.midOut} lefts out), averaged over everyone. Small numbers are how much that left moves from jump to jump.</div></div>`;
+  }
+  const guide = isS
+    ? `<div class="guide"><div><b>Best vs average top speed</b><p>The best run shows what each athlete can reach; the average shows what they bring on a normal day. A big gap between them means the top speed isn't repeatable yet.</p></div>
+      <div><b>Step rate and step length</b><p>Top speed is rate × length. Athletes reach the same speed in different ways, so compare each athlete against their own numbers over time, not against each other.</p></div></div>`
+    : `<div class="guide"><div><b>Last 5 m and carry</b><p>The last 5 m is the speed the pole has to work with. Carry shows how much of each athlete's sprint speed survives the pole carry and the plant, which separates a speed problem from an approach problem.</p></div>
+      <div><b>Takeoff spread and lefts</b><p>A small takeoff spread with the same lefts means a run-up that repeats. Use the left columns to set each athlete's mid mark where their left actually lands.</p></div></div>`;
+  const p2 = `<div class="page">${head}
+    <div class="box"><h4>Side by side</h4>${tbl}<div style="font-size:10.5px;color:${INK2};margin-top:6px">Best value in each row in pink. Averages use every ${testName(test).toLowerCase()} run in the period.</div></div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>${isS ? "Speed from 10 m to the finish · each athlete's best run" : "Speed into the takeoff · each athlete's best jump"}</h4></div>${curves}${clg}</div>
+    ${leftsBox}
+    ${isS ? `<div class="box">${guide}</div>` : ""}
+    ${footer(2, 2)}</div>`;
+  return p1 + p2;
+}
+function openCompareReport(test, ids) {
+  const el = $("#report");
+  el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + compareReport(test, ids);
   el.classList.remove("hidden"); el.scrollTop = 0;
   const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
   fit(); window.addEventListener("resize", fit, { once: true });
