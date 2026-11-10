@@ -380,8 +380,7 @@ function openSessionReport(ids) {
   const el = $("#report");
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + sessionReport(list);
   el.classList.remove("hidden"); el.scrollTop = 0;
-  const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
-  fit(); window.addEventListener("resize", fit, { once: true });
+  layoutReport(el);
 }
 
 // ---------- athlete comparison report: the athletes picked in Analytics, side by side for one test ----------
@@ -544,8 +543,34 @@ function openCompareReport(test, ids) {
   const el = $("#report");
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + compareReport(test, ids);
   el.classList.remove("hidden"); el.scrollTop = 0;
-  const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
-  fit(); window.addEventListener("resize", fit, { once: true });
+  layoutReport(el);
+}
+
+// Pages are letter size (816 × 1056). On a phone each page is shrunk as a whole picture (transform), so
+// the layout is exactly the printed one. Then every page is checked: if anything would run into the
+// footer (a phone that sets text a little bigger, a long name, lots of lefts), that page's content is
+// scaled down step by step until it fits. So a report always prints one page per page.
+function layoutReport(el) {
+  el.querySelectorAll(".page").forEach((p) => {
+    if (!p.parentElement.classList.contains("pwrap")) { const w = document.createElement("div"); w.className = "pwrap"; p.before(w); w.appendChild(p); }
+    if (!p.querySelector(":scope > .pbody")) {
+      const body = document.createElement("div"); body.className = "pbody";
+      [...p.children].filter((c) => !c.classList.contains("foot") && !c.classList.contains("fine")).forEach((c) => body.appendChild(c));
+      p.prepend(body);
+    }
+  });
+  const scale = () => {
+    const s = Math.min(1, (window.innerWidth - 16) / 816);
+    el.querySelectorAll(".pwrap").forEach((w) => { w.style.width = 816 * s + "px"; w.style.height = 1056 * s + "px"; w.firstElementChild.style.transform = s < 1 ? `scale(${s})` : ""; });
+  };
+  scale();
+  el.querySelectorAll(".page").forEach((p) => {
+    const body = p.querySelector(".pbody"), foot = p.querySelector(".foot"); if (!foot) return;
+    const room = () => { let bottom = 0; for (const c of body.children) bottom = Math.max(bottom, c.getBoundingClientRect().bottom); return foot.getBoundingClientRect().top - bottom; };
+    let k = 1; body.style.zoom = "";
+    while (room() < 4 && k > 0.72) { k -= 0.02; body.style.zoom = k.toFixed(2); }
+  });
+  if (!el._resize) { el._resize = true; window.addEventListener("resize", () => { if (!el.classList.contains("hidden")) scale(); }); }
 }
 
 function openReport(id) {
@@ -555,11 +580,10 @@ function openReport(id) {
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + (run.mode === "sprint" ? sprintReport(run) : vaultReport(run));
   el.classList.remove("hidden"); el.scrollTop = 0;
   // fit the letter-size pages to the phone screen
-  const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
-  fit(); window.addEventListener("resize", fit, { once: true });
+  layoutReport(el);
 }
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-rep]"); if (!b) return;
   if (b.dataset.rep === "close") { $("#report").classList.add("hidden"); $("#report").innerHTML = ""; }
-  if (b.dataset.rep === "print") { $("#report").querySelectorAll(".page").forEach((p) => (p.style.zoom = "")); window.print(); setTimeout(() => { const w = Math.min(1, (window.innerWidth - 16) / 816); $("#report").querySelectorAll(".page").forEach((p) => (p.style.zoom = w < 1 ? w : "")); }, 500); }
+  if (b.dataset.rep === "print") window.print();
 });

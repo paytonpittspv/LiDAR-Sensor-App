@@ -32,6 +32,7 @@
 :root[data-theme="light"]{--bg:#ffffff;--card:#f6f4fd;--card2:#ece8fb;--text:#17142c;--muted:#5f5a80;--line:#dcd6f3;
   --pink:#e0147a;--purple:#7444e8;--blue:#0f8fd6;--good:#13a35f;--bad:#d62650;color-scheme:light}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:15px;line-height:1.45}
 button,input,select{font:inherit;color:inherit}
 .top{position:sticky;top:0;z-index:20;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -159,7 +160,10 @@ svg text{font-family:var(--ui)}
 button:focus-visible,.chip:focus-visible,.opt:focus-visible{outline:2px solid var(--purple);outline-offset:2px}
 .hidden{display:none!important}
 /* ---------- printable report ---------- */
-#report{position:fixed;inset:0;z-index:50;background:#e9e6f3;overflow:auto;-webkit-overflow-scrolling:touch}
+#report{position:fixed;inset:0;z-index:50;background:#e9e6f3;overflow:auto;-webkit-overflow-scrolling:touch;-webkit-text-size-adjust:none;text-size-adjust:none}
+#report .pwrap{margin:16px auto;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,.12)}
+#report .pwrap .page{transform-origin:0 0;margin:0;box-shadow:none}
+.page .pbody{transform-origin:top center}
 #report .bar{position:sticky;top:0;display:flex;gap:8px;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;background:#17142c;color:#fff;z-index:2}
 #report .bar button{background:#2b2550;color:#fff;border:0;border-radius:10px;padding:9px 14px;font-weight:700}
 .page{--display:"Report Sans","Helvetica Neue",Helvetica,Arial,sans-serif;--ui:"Report Sans","Helvetica Neue",Helvetica,Arial,sans-serif;font-feature-settings:"kern","tnum","lnum";--ink:#1d1838;--ink2:#5b5680;--rule:#dcd7ee;--acc:#e0147a;--acc2:#7444e8;--acc3:#0f8fd6;--soft:#fbe7f1;
@@ -271,8 +275,9 @@ button:focus-visible,.chip:focus-visible,.opt:focus-visible{outline:2px solid va
   body > *:not(#report){display:none!important}
   #report{position:static;background:#fff;overflow:visible}
   #report .bar{display:none}
-  .page{margin:0;box-shadow:none;page-break-after:always;break-after:page}
-  .page:last-child{page-break-after:auto;break-after:auto}
+  #report .pwrap{width:auto!important;height:auto!important;margin:0!important;box-shadow:none!important;overflow:visible;page-break-after:always;break-after:page}
+  #report .pwrap:last-child{page-break-after:auto;break-after:auto}
+  #report .pwrap .page,.page{transform:none!important;margin:0;box-shadow:none}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 </style>
@@ -2666,8 +2671,7 @@ function openSessionReport(ids) {
   const el = $("#report");
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + sessionReport(list);
   el.classList.remove("hidden"); el.scrollTop = 0;
-  const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
-  fit(); window.addEventListener("resize", fit, { once: true });
+  layoutReport(el);
 }
 
 // ---------- athlete comparison report: the athletes picked in Analytics, side by side for one test ----------
@@ -2830,8 +2834,34 @@ function openCompareReport(test, ids) {
   const el = $("#report");
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + compareReport(test, ids);
   el.classList.remove("hidden"); el.scrollTop = 0;
-  const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
-  fit(); window.addEventListener("resize", fit, { once: true });
+  layoutReport(el);
+}
+
+// Pages are letter size (816 × 1056). On a phone each page is shrunk as a whole picture (transform), so
+// the layout is exactly the printed one. Then every page is checked: if anything would run into the
+// footer (a phone that sets text a little bigger, a long name, lots of lefts), that page's content is
+// scaled down step by step until it fits. So a report always prints one page per page.
+function layoutReport(el) {
+  el.querySelectorAll(".page").forEach((p) => {
+    if (!p.parentElement.classList.contains("pwrap")) { const w = document.createElement("div"); w.className = "pwrap"; p.before(w); w.appendChild(p); }
+    if (!p.querySelector(":scope > .pbody")) {
+      const body = document.createElement("div"); body.className = "pbody";
+      [...p.children].filter((c) => !c.classList.contains("foot") && !c.classList.contains("fine")).forEach((c) => body.appendChild(c));
+      p.prepend(body);
+    }
+  });
+  const scale = () => {
+    const s = Math.min(1, (window.innerWidth - 16) / 816);
+    el.querySelectorAll(".pwrap").forEach((w) => { w.style.width = 816 * s + "px"; w.style.height = 1056 * s + "px"; w.firstElementChild.style.transform = s < 1 ? `scale(${s})` : ""; });
+  };
+  scale();
+  el.querySelectorAll(".page").forEach((p) => {
+    const body = p.querySelector(".pbody"), foot = p.querySelector(".foot"); if (!foot) return;
+    const room = () => { let bottom = 0; for (const c of body.children) bottom = Math.max(bottom, c.getBoundingClientRect().bottom); return foot.getBoundingClientRect().top - bottom; };
+    let k = 1; body.style.zoom = "";
+    while (room() < 4 && k > 0.72) { k -= 0.02; body.style.zoom = k.toFixed(2); }
+  });
+  if (!el._resize) { el._resize = true; window.addEventListener("resize", () => { if (!el.classList.contains("hidden")) scale(); }); }
 }
 
 function openReport(id) {
@@ -2841,13 +2871,12 @@ function openReport(id) {
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + (run.mode === "sprint" ? sprintReport(run) : vaultReport(run));
   el.classList.remove("hidden"); el.scrollTop = 0;
   // fit the letter-size pages to the phone screen
-  const fit = () => { const w = Math.min(1, (window.innerWidth - 16) / 816); el.querySelectorAll(".page").forEach((p) => { p.style.zoom = w < 1 ? w : ""; }); };
-  fit(); window.addEventListener("resize", fit, { once: true });
+  layoutReport(el);
 }
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-rep]"); if (!b) return;
   if (b.dataset.rep === "close") { $("#report").classList.add("hidden"); $("#report").innerHTML = ""; }
-  if (b.dataset.rep === "print") { $("#report").querySelectorAll(".page").forEach((p) => (p.style.zoom = "")); window.print(); setTimeout(() => { const w = Math.min(1, (window.innerWidth - 16) / 816); $("#report").querySelectorAll(".page").forEach((p) => (p.style.zoom = w < 1 ? w : "")); }, 500); }
+  if (b.dataset.rep === "print") window.print();
 });
 
 

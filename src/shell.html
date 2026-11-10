@@ -32,6 +32,7 @@
 :root[data-theme="light"]{--bg:#ffffff;--card:#f6f4fd;--card2:#ece8fb;--text:#17142c;--muted:#5f5a80;--line:#dcd6f3;
   --pink:#e0147a;--purple:#7444e8;--blue:#0f8fd6;--good:#13a35f;--bad:#d62650;color-scheme:light}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:15px;line-height:1.45}
 button,input,select{font:inherit;color:inherit}
 .top{position:sticky;top:0;z-index:20;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -159,7 +160,10 @@ svg text{font-family:var(--ui)}
 button:focus-visible,.chip:focus-visible,.opt:focus-visible{outline:2px solid var(--purple);outline-offset:2px}
 .hidden{display:none!important}
 /* ---------- printable report ---------- */
-#report{position:fixed;inset:0;z-index:50;background:#e9e6f3;overflow:auto;-webkit-overflow-scrolling:touch}
+#report{position:fixed;inset:0;z-index:50;background:#e9e6f3;overflow:auto;-webkit-overflow-scrolling:touch;-webkit-text-size-adjust:none;text-size-adjust:none}
+#report .pwrap{margin:16px auto;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,.12)}
+#report .pwrap .page{transform-origin:0 0;margin:0;box-shadow:none}
+.page .pbody{transform-origin:top center}
 #report .bar{position:sticky;top:0;display:flex;gap:8px;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;background:#17142c;color:#fff;z-index:2}
 #report .bar button{background:#2b2550;color:#fff;border:0;border-radius:10px;padding:9px 14px;font-weight:700}
 .page{--display:"Report Sans","Helvetica Neue",Helvetica,Arial,sans-serif;--ui:"Report Sans","Helvetica Neue",Helvetica,Arial,sans-serif;font-feature-settings:"kern","tnum","lnum";--ink:#1d1838;--ink2:#5b5680;--rule:#dcd7ee;--acc:#e0147a;--acc2:#7444e8;--acc3:#0f8fd6;--soft:#fbe7f1;
@@ -271,8 +275,9 @@ button:focus-visible,.chip:focus-visible,.opt:focus-visible{outline:2px solid va
   body > *:not(#report){display:none!important}
   #report{position:static;background:#fff;overflow:visible}
   #report .bar{display:none}
-  .page{margin:0;box-shadow:none;page-break-after:always;break-after:page}
-  .page:last-child{page-break-after:auto;break-after:auto}
+  #report .pwrap{width:auto!important;height:auto!important;margin:0!important;box-shadow:none!important;overflow:visible;page-break-after:always;break-after:page}
+  #report .pwrap:last-child{page-break-after:auto;break-after:auto}
+  #report .pwrap .page,.page{transform:none!important;margin:0;box-shadow:none}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 </style>
