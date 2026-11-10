@@ -3,21 +3,24 @@
 Top speed, last-5 m speed and every left, measured with one LiDAR on a tripod. There are no
 timing gates and no camera calibration.
 
-**Practice app:** https://paytonpittspv.github.io/LiDAR-Sensor-App/
+**Your app:** https://paytonpittspv.github.io/LiDAR-Sensor-App/
 
 **Install it like an app:** open the link on your phone, then
 - **iPhone (Safari):** Share → **Add to Home Screen**
 - **Android (Chrome):** ⋮ menu → **Install app** (or Add to Home screen)
 
-It gets its own icon, opens full screen without the browser bars, and works offline once it's
-been opened. Do the same from **http://192.168.4.1** while on the sensor's Wi-Fi to install the
-sensor's copy (the one that records).
+It gets its own icon, opens full screen and works with no connection at all once it's been
+opened. This is where all your runs, analytics and reports live.
 
-The practice website runs the full app with simulated runs. You can add athletes, try sprint
-and vault sessions, Hands Free Mode and the reports. To record for real, join the sensor's
-Wi-Fi (`SpeedLidar`, password `vault1234`) and open **http://192.168.4.1**. Browsers block a
-secure website from talking to the sensor, so recording only works from the copy the sensor
-serves. Move athletes and runs between the two with **Settings → Export / Import backup**.
+**Recording:** join the sensor's Wi-Fi (`SpeedLidar`, password `vault1234`) and open
+**http://192.168.4.1** in Safari. Phones only keep a web app for offline use when it comes from a
+secure (https) address, and a secure app isn't allowed to talk to the sensor, so recording happens
+on the sensor's page. After each session tap **Copy runs** there, open the home-screen app and tap
+**Paste runs**. Runs are matched so nothing is added twice, and athletes are matched by name.
+Don't add 192.168.4.1 to the home screen; it won't open off the sensor's Wi-Fi.
+
+New run in the home-screen app plays a simulated practice run. Simulated and demo runs are
+marked, never sent, and can be cleared in Settings.
 
 ## Hardware
 

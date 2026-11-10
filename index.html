@@ -966,7 +966,7 @@ const WEB_COPY = location.protocol === "https:";
 // the web copy works offline once it's been opened (the sensor's own copy is always offline anyway)
 if (WEB_COPY && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 function pollLoop() {
-  if (WEB_COPY) { const p = $("#conn"); p.className = "pill off"; p.textContent = "Practice"; return; } poll().finally(() => setTimeout(pollLoop, view === "new" && ["waiting", "ready", "recording"].includes(cap.phase) ? 120 : 250)); }
+  if (WEB_COPY) { const p = $("#conn"); p.className = "pill off"; p.textContent = "Offline app"; return; } poll().finally(() => setTimeout(pollLoop, view === "new" && ["waiting", "ready", "recording"].includes(cap.phase) ? 120 : 250)); }
 
 // ---------------- sounds ----------------
 // The ready chime is synthesised once into a WAV clip and played with an <audio> element.
@@ -1158,6 +1158,7 @@ function finishCapture(raw) {
     cap.error = res.error; arm(); return;
   }
   const run = { id: uid(), ts: Date.now(), athleteId: cap.athleteId, mode: cap.mode, res };
+  if (cap.simRun) { run.sim = true; cap.simRun = false; }
   if (cap.mode === "sprint") run.target = cap.target; else run.setup = cap.setup;
   if (settings.solo) {
     keepRun(run);
@@ -1182,7 +1183,7 @@ function simulateRun() {
     }
   }
   const t0 = raw.t[0], n = raw.t.length; let i = 0;
-  cap.sim = true; startLive(0); cap.sim = true;
+  cap.sim = true; cap.simRun = true; startLive(0); cap.sim = true;
   const t0wall = performance.now();
   const step = () => {
     if (cap.phase !== "recording" || !cap.live) return;
@@ -1578,6 +1579,7 @@ function summaryHTML() {
   let h = `<div class="between" style="align-items:center"><h1 style="margin:0">Session ended</h1></div>
     <div class="card tint"><div class="small muted">${s ? `${dayLabel(dayKey(s.start), true)} · ${timeLabel(s.start)}` : ""} · ${list.length} run${list.length === 1 ? "" : "s"}</div>
     <div class="grid2" style="margin-top:10px"><button class="btn primary" data-act="session-report" ${list.length ? "" : "disabled"}>Print report (PDF)</button><button class="btn" data-act="cap-close">Done</button></div></div>`;
+  h += sendCardHTML(true);
   if (!list.length) return h + `<div class="card empty">No runs were saved in this session.</div>`;
   const byA = {}; for (const r of list) (byA[r.athleteId] = byA[r.athleteId] || []).push(r);
   for (const [aid, rs] of Object.entries(byA)) {
@@ -1592,7 +1594,7 @@ function runRow(r, selectable) {
   const h = headline(r), on = compareSel.includes(r.id);
   return `<div class="item" data-act="open-run" data-id="${r.id}">
     ${selectable ? `<button class="check ${on ? "on" : ""}" data-act="cmp-toggle" data-id="${r.id}" aria-label="Compare this run" aria-pressed="${on}">${on ? compareSel.indexOf(r.id) + 1 : ""}</button>` : ""}
-    <div style="flex:1;min-width:0"><b>${esc(athleteById(r.athleteId).name)}</b><div class="small muted">${testName(testKey(r))} · ${timeLabel(r.ts)}${r.mode === "vault" && r.res.steps.counted ? ` · ${r.res.steps.lefts} lefts` : ""}</div></div>
+    <div style="flex:1;min-width:0"><b>${esc(athleteById(r.athleteId).name)}</b><div class="small muted">${r.sim ? `<span style="color:var(--purple);font-weight:700">Simulated</span> · ` : ""}${testName(testKey(r))} · ${timeLabel(r.ts)}${r.mode === "vault" && r.res.steps.counted ? ` · ${r.res.steps.lefts} lefts` : ""}</div></div>
     <div class="r">${h.text}<div class="small muted" style="font-weight:500">${r.mode === "sprint" ? `top ${f2(r.res.top.speed)}` : `top ${f2(r.res.top.speed)}`}</div></div></div>`;
 }
 function compareBar() {
@@ -1639,8 +1641,9 @@ function homeHTML() {
   let h = `<div class="hello"><div class="hi">${hi}</div><div class="muted">${line}</div></div>`;
   h += `<div class="card tint"><div class="between"><div><div class="label">Sensor</div>
       <div class="small" style="margin-top:2px"><span class="dot" style="background:${sensor.connected ? "var(--good)" : "var(--muted)"}"></span>${sensor.connected ? `Connected · <span data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</span> m` : "Not connected"}</div></div>
-      <div class="small muted" style="text-align:right;max-width:55%">${sensor.connected ? `${sensor.rate} readings/s` : (WEB_COPY ? "Practice website: runs are simulated. To record, join the SpeedLidar Wi-Fi and open 192.168.4.1." : "Join the SpeedLidar Wi-Fi to record.")}</div></div>
+      <div class="small muted" style="text-align:right;max-width:55%">${sensor.connected ? `${sensor.rate} readings/s` : (WEB_COPY ? "This app opens anywhere and keeps all your runs. To record, join the SpeedLidar Wi-Fi and open 192.168.4.1 in Safari. New run here is a simulated practice run." : "Join the SpeedLidar Wi-Fi to record.")}</div></div>
     <button class="btn big primary" style="margin-top:12px" data-go="new">New run</button></div>`;
+  h += sendCardHTML(true) + (WEB_COPY ? getCardHTML() : "");
   if (!athletes.length) return h + `<div class="card"><b>Start here</b><div class="small muted" style="margin:4px 0 10px">Add the athletes you'll be timing. Body weight is optional and only used for power.</div><button class="btn" data-act="ath-new">Add an athlete</button></div>`;
   // quick numbers
   const tile = (v, k, go) => `<button class="qt" ${go ? `data-go="${go}"` : ""}><b>${v}</b><span>${k}</span></button>`;
@@ -2011,9 +2014,10 @@ function settingsHTML() {
     <div class="card between"><div><b>Body weight in</b></div><div class="seg" style="width:140px"><button data-act="unit" data-v="lb" aria-pressed="${settings.weightUnit === "lb"}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${settings.weightUnit === "kg"}">kg</button></div></div>
     <div class="card between"><div><b>Look</b></div><div class="seg" style="width:200px"><button data-act="theme" data-v="" aria-pressed="${!settings.theme}">Auto</button><button data-act="theme" data-v="dark" aria-pressed="${settings.theme === "dark"}">Dark</button><button data-act="theme" data-v="light" aria-pressed="${settings.theme === "light"}">Light</button></div></div>`;
   h += `<h2>Vault setup</h2>${setupGuide("runway100")}${setupGuide("runway150")}`;
-  h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">The app lives on the sensor and needs no internet. ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
+  h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">${WEB_COPY ? "This copy of the app opens with no connection at all." : "This is the sensor's page. Send runs to your home-screen app after each session."} ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
     <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
-    <div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps.</div><button class="btn" data-act="demo-data">Add demo data</button> <button class="btn danger" data-act="clear-all">Delete all runs</button></div>`;
+    ${WEB_COPY ? getCardHTML() : sendCardHTML(false)}
+    <div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps. Simulated runs are marked and never sent.</div><div class="row"><button class="btn" data-act="demo-data">Add demo data</button>${runs.some((r) => r.sim) ? `<button class="btn" data-act="del-sim">Delete simulated runs</button>` : ""}<button class="btn danger" data-act="clear-all">Delete all runs</button></div></div>`;
   h += `<p class="small muted" style="text-align:center;margin-top:20px">PAYTON'S LiDAR SENSOR · designed by Payton Pitts</p>`;
   return h;
 }
@@ -2040,6 +2044,7 @@ function render() {
   const vs = $("#voiceSw"); if (vs) vs.onchange = () => { settings.voice = vs.checked; saveSettings(); unlockAudio(); if (vs.checked) say("Voice on"); };
   const ct = $("#customTarget"); if (ct) ct.onchange = () => { const v = parseInt(ct.value, 10); if (v >= 5 && v <= 80) { cap.target = v; settings.lastTarget = v; saveSettings(); render(); } };
   const imp = $("#importFile"); if (imp) imp.onchange = () => importBackup(imp.files[0]);
+  const sf = $("#syncFile"); if (sf) sf.onchange = () => importBackup(sf.files[0]);
 }
 function nav(v, arg) { backStack.push([view, viewArg]); go(v, arg); }
 function back() { const p = backStack.pop(); if (p) go(p[0], p[1]); else go("home"); }
@@ -2094,10 +2099,97 @@ document.addEventListener("click", (e) => {
     case "unit": settings.weightUnit = v; saveSettings(); render(); break;
     case "theme": settings.theme = v || null; saveSettings(); if (v) document.documentElement.setAttribute("data-theme", v); else document.documentElement.removeAttribute("data-theme"); render(); break;
     case "export": exportBackup(); break;
+    case "send-runs": sendRuns(false); break;
+    case "send-all": sendRuns(true); break;
+    case "send-file": saveRunsFile(); break;
+    case "paste-runs": pasteRuns(); break;
+    case "paste-add": { const ta = $("#pasteArea"); if (ta && ta.value.trim()) addRunsFrom(ta.value); else toast("Paste the copied runs into the box first."); break; }
+    case "del-sim": { const n = runs.filter((r) => r.sim).length; runs = runs.filter((r) => !r.sim); compareSel = []; saveRuns(); toast(`Deleted ${n} simulated run${n === 1 ? "" : "s"}`); render(); break; }
     case "demo-data": addDemoData(); break;
     case "clear-all": if (el.dataset.confirm === "1") { runs = []; compareSel = []; saveRuns(); toast("All runs deleted"); render(); } else { el.dataset.confirm = "1"; el.textContent = "Tap again to delete all runs"; } break;
   }
 });
+
+// ---------------- moving runs from the sensor page to the home-screen app ----------------
+// The sensor serves the app over plain http, which phones won't keep for offline use. The copy on
+// GitHub (https) opens anywhere, so it's the home for all runs: record on the sensor page, then
+// tap "Copy runs" there and "Paste runs" in the home-screen app. Runs are matched by id, athletes by name.
+const SYNC_URL = "https://paytonpittspv.github.io/LiDAR-Sensor-App/";
+const sentSet = () => new Set(settings.sentIds || []);
+const unsentRuns = () => { const s = sentSet(); return runs.filter((r) => !r.sim && !s.has(r.id)); };
+function syncText(list) {
+  const ids = new Set(list.map((r) => r.athleteId));
+  return JSON.stringify({ app: "paytons-lidar-sensor", v: 1, kind: "runs", athletes: athletes.filter((a) => ids.has(a.id)), runs: list });
+}
+function markSent(list) { settings.sentIds = [...new Set([...(settings.sentIds || []), ...list.map((r) => r.id)])].slice(-5000); saveSettings(); }
+// copy has to happen right inside the tap, so it's done the old way (works on plain http, unlike navigator.clipboard)
+function copyText(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;font-size:16px";
+  document.body.appendChild(ta);
+  let ok = false;
+  try {
+    const r = document.createRange(); r.selectNodeContents(ta); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    ta.setSelectionRange(0, text.length); ok = document.execCommand("copy");
+  } catch (e) { ok = false; }
+  ta.remove(); try { getSelection().removeAllRanges(); } catch (e) {}
+  return ok;
+}
+function sendRuns(all) {
+  const list = all ? runs.filter((r) => !r.sim) : unsentRuns();
+  if (!list.length) { toast("Nothing new to send."); return; }
+  if (copyText(syncText(list))) { markSent(list); toast(`Copied ${list.length} run${list.length > 1 ? "s" : ""}. Open your home-screen app and tap Paste runs.`); render(); }
+  else { toast("Couldn't copy here, so they're saved as a file instead."); saveRunsFile(list); }
+}
+function saveRunsFile(list) {
+  list = list || unsentRuns(); if (!list.length) { toast("Nothing new to send."); return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([syncText(list)], { type: "application/json" }));
+  a.download = `lidar-runs-${dayKey(Date.now())}.json`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000); markSent(list); render();
+}
+// the card on the sensor page
+function sendCardHTML(compact) {
+  if (WEB_COPY) return "";
+  const n = unsentRuns().length;
+  if (!n && compact) return "";
+  return `<div class="card ${n ? "tint" : ""}"><div class="label">Send to your home-screen app</div>
+    <div class="small muted" style="margin:4px 0 10px">${n ? `<b style="color:var(--text)">${n} run${n > 1 ? "s" : ""}</b> not in your app yet.` : "Every run here is in your app."} Copy them, open PAYTON'S LiDAR SENSOR from your home screen and tap <b>Paste runs</b>. Send after every session: this page only lives in Safari, and an iPhone can clear it after a week without a visit.</div>
+    <div class="row"><button class="btn ${n ? "primary" : ""}" data-act="send-runs" ${n ? "" : "disabled"}>Copy ${n || ""} run${n === 1 ? "" : "s"}</button><button class="btn" data-act="send-file" ${n ? "" : "disabled"}>Save as file</button>${compact ? "" : `<button class="btn" data-act="send-all">Copy all again</button>`}</div></div>`;
+}
+// the card in the home-screen app
+let pasteBox = false;
+function getCardHTML() {
+  if (!WEB_COPY) return "";
+  return `<div class="card"><div class="label">Get runs from the sensor</div>
+    <div class="small muted" style="margin:4px 0 10px">Record on the sensor page (SpeedLidar Wi-Fi, 192.168.4.1 in Safari), tap <b>Copy runs</b> there, then come back here.</div>
+    <div class="row"><button class="btn primary" data-act="paste-runs">Paste runs</button><label class="btn" style="cursor:pointer">Open file<input type="file" id="syncFile" accept="application/json,.json" class="hidden"></label></div>
+    ${pasteBox ? `<div class="field" style="margin-top:10px"><label for="pasteArea">Press and hold in the box, tap Paste, then Add runs</label><textarea id="pasteArea" rows="3" style="width:100%;font-size:16px"></textarea></div><button class="btn primary" data-act="paste-add">Add runs</button>` : ""}</div>`;
+}
+async function pasteRuns() {
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText) { const t = await navigator.clipboard.readText(); if (t && t.trim()) { addRunsFrom(t); return; } }
+  } catch (e) {}
+  pasteBox = true; render(); const ta = $("#pasteArea"); if (ta) ta.focus();
+}
+// merges runs (by id) and athletes (by id, then by name) from a copied text, a runs file or a backup
+function addRunsFrom(text) {
+  let j; try { j = JSON.parse(text); } catch (e) { j = null; }
+  if (!j || j.app !== "paytons-lidar-sensor" || !Array.isArray(j.runs)) { toast("That isn't runs from this app. Tap Copy runs on the sensor page first."); return false; }
+  const byId = new Map(athletes.map((a) => [a.id, a])), byName = new Map(athletes.map((a) => [a.name.trim().toLowerCase(), a])), map = {};
+  let newA = 0;
+  for (const a of j.athletes || []) {
+    const hit = byId.get(a.id) || byName.get(String(a.name || "").trim().toLowerCase());
+    if (hit) { map[a.id] = hit.id; if (!hit.kg && a.kg) hit.kg = a.kg; }
+    else { athletes.push(Object.assign({}, a)); byId.set(a.id, a); byName.set(String(a.name).trim().toLowerCase(), a); map[a.id] = a.id; newA++; }
+  }
+  const have = new Set(runs.map((r) => r.id)); let added = 0;
+  for (const r of j.runs) if (r && r.id && !have.has(r.id)) { runs.push(Object.assign({}, r, { athleteId: map[r.athleteId] || r.athleteId })); added++; }
+  runs.sort((a, b) => b.ts - a.ts);
+  saveAthletes(); saveRuns(); pasteBox = false;
+  const dup = j.runs.length - added;
+  toast(added ? `Added ${added} run${added > 1 ? "s" : ""}${newA ? ` and ${newA} athlete${newA > 1 ? "s" : ""}` : ""}${dup ? ` (${dup} already here)` : ""}.` : `All ${j.runs.length} runs were already here.`);
+  render(); return true;
+}
 
 // ---------------- backup ----------------
 function exportBackup() {
@@ -2107,16 +2199,7 @@ function exportBackup() {
 }
 function importBackup(file) {
   if (!file) return;
-  const fr = new FileReader();
-  fr.onload = () => {
-    try {
-      const j = JSON.parse(fr.result); if (!j.runs || !j.athletes) throw 0;
-      const haveA = new Set(athletes.map((a) => a.id)), haveR = new Set(runs.map((r) => r.id));
-      athletes = athletes.concat(j.athletes.filter((a) => !haveA.has(a.id))); runs = runs.concat(j.runs.filter((r) => !haveR.has(r.id))).sort((a, b) => b.ts - a.ts);
-      saveAthletes(); saveRuns(); toast(`Imported ${j.runs.length} runs`); render();
-    } catch (e) { toast("That file isn't a backup from this app."); }
-  };
-  fr.readAsText(file);
+  const fr = new FileReader(); fr.onload = () => addRunsFrom(fr.result); fr.readAsText(file);
 }
 function addDemoData() {
   const people = [["Demo Athlete", 68, 0], ["Demo Vaulter 2", 74, -0.35], ["Demo Vaulter 3", 63, 0.2]];
@@ -2130,7 +2213,7 @@ function addDemoData() {
         const vmax = 8.7 + dv + (13 - day) * 0.03 + Math.random() * 0.15;
         const s = Engine.simulate({ seed: Math.floor(Math.random() * 1e6) + 1, vmax, target: 30, back: 3 });
         const res = Engine.process(s.raw, { mode: "sprint", target: 30, mass: a.kg });
-        if (!res.error) runs.push({ id: uid(), ts, athleteId: a.id, mode: "sprint", target: 30, res });
+        if (!res.error) runs.push({ id: uid(), ts, athleteId: a.id, mode: "sprint", target: 30, res, sim: true });
         const setup = ["runway100", "runway150", "polerun100"][(day / 3 + rep) % 3 | 0];
         const steps = setup === "runway150" ? 19 + (rep % 2) : 15 + (rep % 2);
         const carry = 0.55 + (name.endsWith("2") ? 0.25 : 0) + Math.random() * 0.2;
@@ -2141,7 +2224,7 @@ function addDemoData() {
           if (!probe.error) { const shift = Math.round((box - (11 + Math.random() * 2.5) * FT - 0.5 - probe.takeoff.sensor) * 100); sv.raw.d = sv.raw.d.map((cm) => (cm > 0 ? Math.max(1, cm + shift) : cm)); }
         }
         const rv = Engine.process(sv.raw, ctx);
-        if (!rv.error) runs.push({ id: uid(), ts: ts + 300e3, athleteId: a.id, mode: "vault", setup, res: rv });
+        if (!rv.error) runs.push({ id: uid(), ts: ts + 300e3, athleteId: a.id, mode: "vault", setup, res: rv, sim: true });
       }
     }
   }
