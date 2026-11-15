@@ -90,6 +90,9 @@ const standalone = () => { try { return navigator.standalone === true || matchMe
 Store.onError(() => toast("Couldn't save: this phone's storage is full. Export a backup in Settings, then delete old runs."));
 let athletes = DB.get("athletes", []);
 let runs = DB.get("runs", []).map((r) => (r.setup === "polerun" ? Object.assign(r, { setup: "polerun100" }) : r));
+// vault counting (Nov 15): you start on the mark and the first step is a right, so L1 is the first left after it.
+// Runs saved before counted the step off the mark as L1 when the step count was odd: recount them once.
+{ let fixed = 0; for (const r of runs) { const S = r.res && r.res.steps; if (r.mode === "vault" && S && S.counted && !S.v2) { S.lefts = Math.floor(S.counted / 2); S.v2 = true; fixed++; } } if (fixed) DB.set("runs", runs); }
 let settings = Object.assign({ midOut: 4, voice: false, chime: "original", solo: false, theme: null, weightUnit: "lb", lastAthlete: null, lastMode: "sprint", lastTarget: 30, lastSetup: "runway100" }, DB.get("settings", {}));
 const saveAthletes = () => DB.set("athletes", athletes);
 const saveRuns = () => DB.set("runs", runs);
@@ -382,7 +385,7 @@ function simulateRun() {
   let raw;
   if (cap.mode === "sprint") raw = Engine.simulate({ seed, vmax, target: cap.target, back: 3 }).raw;
   else {
-    const steps = 14 + Math.floor(Math.random() * 5);
+    const steps = 2 * (7 + Math.floor(Math.random() * 3)) + 1;   // start on the mark + 14-18 steps
     const pole = SETUPS[cap.setup].pole;
     raw = Engine.simulate({ seed, vmax, steps, hop: Math.random() < 0.3, back: 3, finish: (Math.random() - 0.5) * 0.8, popup: pole, flight: 0.5 + Math.random() * 0.2 }).raw;
     {
@@ -557,11 +560,16 @@ function cardHTML(label, value, unit, sub, hero, extra) {
 // every foot contact with its spot in feet: from the back of the box (runway) or from the start (pole runs)
 function contactsOf(r) {
   const R = r.res; if (!R || r.mode !== "vault") return [];
-  if (R.contacts) return R.contacts;
+  if (R.contacts) return R.contacts.map((c) => {   // count lefts the vault way (see recountLefts)
+    const fromEnd = R.contacts.length - 1 - R.contacts.indexOf(c), lefts = Math.floor(R.contacts.length / 2);
+    const first = fromEnd % 2 === 0 && lefts - fromEnd / 2 < 1, left = fromEnd % 2 === 0 && !first;
+    return Object.assign({}, c, { left, first, out: left ? fromEnd / 2 : null, n: left ? lefts - fromEnd / 2 : null });
+  });
   // runs saved before this was added: work it out from the step times and the curve
   const st = R.steps.times, n = st.length, cv = R.curve, box = R.box || null;
   return st.map((t, i) => { const fromEnd = n - 1 - i, left = fromEnd % 2 === 0, k = Math.max(0, cv.t.findIndex((x) => x >= t)), lead = fromEnd === 0 ? 0.5 : 0.4;
-    return { t, left, takeoff: fromEnd === 0, out: left ? fromEnd / 2 : null, n: left ? R.steps.lefts - fromEnd / 2 : null,
+    const first = left && Math.floor(n / 2) - fromEnd / 2 < 1;
+    return { t, left: left && !first, first, takeoff: fromEnd === 0, out: left && !first ? fromEnd / 2 : null, n: left && !first ? Math.floor(n / 2) - fromEnd / 2 : null,
       boxFt: box ? (box - (cv.d[k] + R.start.d + lead)) / FT : null, startFt: (cv.d[k] + lead) / FT, v: cv.v[k] }; });
 }
 const hasBox = (r) => r.mode === "vault";
@@ -586,7 +594,7 @@ function runwayMap(items, o = {}) {
   if (!items.length) return "";
   const run0 = items[0].run, box = hasBox(run0), setup = SETUPS[run0.setup] || {}, single = items.length === 1;
   const W = o.W || 360, pl = o.gutter || 8, pr = box ? 22 : 10;
-  const laneH = single ? 64 : o.laneH || 38, top = single ? 4 : o.gutter ? 2 : 6, axisH = 26, H = top + items.length * laneH + axisH;
+  const laneH = single ? 64 : o.laneH || 38, top = single ? 4 : o.gutter ? 9 : 6, axisH = 26, H = top + items.length * laneH + axisH;
   let far = 20;
   for (const { run } of items) { for (const c of contactsOf(run)) far = Math.max(far, spotFt(run, c) || 0); if (box && run.res.startMarkFt) far = Math.max(far, run.res.startMarkFt); }
   const tripod = box && setup.boxFt ? setup.boxFt : null;
@@ -792,7 +800,7 @@ let view = "home", viewArg = null;
 function go(v, arg) {
   view = v; viewArg = arg == null ? null : arg;
   // New run always opens the start page (sprint or vault, who's running, where to stop) unless a run is being recorded right now
-  if (v === "new" && cap.phase !== "recording" && cap.phase !== "processing" && cap.phase !== "summary") { if (cap.phase === "ready") stopNow(); cap.phase = "setup"; cap.error = null; }
+  if (v === "new" && cap.phase !== "recording" && cap.phase !== "processing" && cap.phase !== "summary") { if (cap.phase === "ready") stopNow(); cap.phase = "setup"; cap.step = "event"; cap.error = null; }
   render(); window.scrollTo(0, 0);
 }
 function voiceCard() {
@@ -911,37 +919,54 @@ function homeHTML() {
   return h;
 }
 
+// ---------------- New run: one question at a time ----------------
+// Event → Distance (sprint: where to stop; vault: distance and sensor placement) → Who's running → Get ready.
+// Chime, voice and Hands Free live in Settings so setting up a run stays quick.
+const WIZ = ["event", "distance", "who"];
+const chimeCard = () => `<div class="card" style="margin-top:6px"><b>Ready chime</b><div class="small muted">Plays every time an athlete has stood in long enough and the sensor is armed. Turn the phone volume up: it plays with the silent switch on and through a Bluetooth speaker.</div>
+  <div class="between" style="margin-top:10px;gap:8px;flex-wrap:wrap"><div class="chips">${[["original", "Original"], ["gatecam", "GateCamLive"]].map(([k, l]) => `<button class="chip sm" data-act="chime-kind" data-v="${k}" aria-pressed="${(CHIMES[settings.chime] ? settings.chime : "original") === k}">${l}</button>`).join("")}</div><button class="btn sm" data-act="chime-test">▶ Play chime</button></div></div>`;
+function wizardHTML() {
+  if (!WIZ.includes(cap.step)) cap.step = "event";
+  const i = WIZ.indexOf(cap.step), vault = cap.mode === "vault";
+  const titles = { event: "Choose event", distance: vault ? "Distance and Sensor Placement" : "Distance", who: "Who's running?" };
+  const subs = { event: "", distance: vault ? "Where you're jumping and how far the tripod is from the box." : "Where the run stops being recorded.", who: "" };
+  let h = sessionBar() + `<div class="wiz-top">${i ? `<button class="btn sm ghost" data-act="wiz-back">‹ Back</button>` : `<span></span>`}<span class="small muted">Step ${i + 1} of ${WIZ.length}</span></div>
+    <div class="wiz-bar" aria-hidden="true">${WIZ.map((_, k) => `<i class="${k <= i ? "on" : ""}"></i>`).join("")}</div>
+    <h1 style="margin-bottom:4px">${titles[cap.step]}</h1>${subs[cap.step] ? `<div class="muted" style="margin-bottom:14px">${subs[cap.step]}</div>` : `<div style="height:10px"></div>`}`;
+  if (cap.error) h += `<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">${esc(cap.error)}</b></div>`;
+  if (cap.step === "event") {
+    const tile = (v, name, sub, icon) => `<button class="tile" data-act="cap-mode" data-v="${v}" aria-pressed="${cap.mode === v}">${icon}<b>${name}</b><span>${sub}</span></button>`;
+    h += `<div class="tiles">${tile("sprint", "Sprint", "Top speed, splits and the fastest flying 10 m", `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4a1.5 1.5 0 1 0 0 .01"/><path d="M7 21l3-6 3 2v5M10 15l1-5 4 2 3-1M11 10l-3 1-2 3"/></svg>`)}
+      ${tile("vault", "Vault", "Lefts, top speed and the last 5 m into the box", `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21L20 4"/><path d="M8 21l3-5 3 1"/><path d="M12 9.5a1.5 1.5 0 1 0 0 .01"/></svg>`)}</div>`;
+  } else if (cap.step === "distance" && !vault) {
+    h += `<div class="label" style="margin-bottom:8px">Stop at</div><div class="bigchips">${[10, 20, 30, 40, 60].map((d) => `<button class="chip big" data-act="cap-target" data-v="${d}" aria-pressed="${cap.target === d}">${d} m</button>`).join("")}</div>
+      <div class="row" style="gap:8px;margin-top:12px"><input type="number" id="customTarget" inputmode="numeric" min="5" max="80" placeholder="Other distance" style="flex:1" value="${[10, 20, 30, 40, 60].includes(cap.target) ? "" : cap.target}"><span class="muted">m</span><button class="btn" data-act="cap-target-custom">Next</button></div>
+      <div class="small muted" style="margin-top:14px">Recording starts by itself when the athlete moves and stops at this distance.</div>`;
+  } else if (cap.step === "distance") {
+    const pole = !!SETUPS[cap.setup].pole, far = SETUPS[cap.setup].boxFt === 150;
+    const pick = (p, f) => (p ? "polerun" : "runway") + (f ? "150" : "100");
+    h += `<div class="label" style="margin:2px 0 8px">Where</div><div class="grid2">
+        <button class="opt" data-act="cap-setup" data-v="${pick(false, far)}" aria-pressed="${!pole}"><b>On runway</b><span>Jumping into the box</span></button>
+        <button class="opt" data-act="cap-setup" data-v="${pick(true, far)}" aria-pressed="${pole}"><b>Off runway</b><span>Pole runs, no box</span></button></div>
+      <div class="label" style="margin:16px 0 8px">Sensor placement</div><div class="grid2">
+        <button class="opt" data-act="cap-setup" data-v="${pick(pole, false)}" aria-pressed="${!far}"><b>100 ft</b><span>Short approach</span></button>
+        <button class="opt" data-act="cap-setup" data-v="${pick(pole, true)}" aria-pressed="${far}"><b>150 ft</b><span>Long approach</span></button></div>
+      <button class="btn big primary" style="margin-top:16px" data-act="wiz-next">Next</button>
+      <details class="howto-d"><summary>How to set up the tripod</summary>${setupGuide(cap.setup)}</details>`;
+  } else {
+    const what = vault ? SETUPS[cap.setup].name : `${cap.target} m sprint`;
+    h += athletePicker();
+    h += `<div class="card wiz-sum"><div><div class="small muted">Event</div><b>${what}</b></div><button class="btn sm ghost" data-act="wiz-edit">Change</button></div>`;
+    const q = cap.queue;
+    h += `<button class="btn big primary" style="margin-top:6px" data-act="cap-ready" ${q.length ? "" : "disabled"}>${!q.length ? "Pick who's running" : q.length === 1 ? `Get ready · ${esc(athleteById(q[0]).name)}` : `Get ready · ${q.length} athletes taking turns`}</button>
+      <div class="small muted" style="text-align:center;margin-top:10px">Hands Free Mode is <b>${settings.solo ? "on" : "off"}</b> · chime, voice and Hands Free are in <a href="#" data-go="settings">Settings</a></div>`;
+  }
+  return h;
+}
 function newHTML() {
   const a = cap.athleteId && athletes.find((x) => x.id === cap.athleteId);
   if (cap.phase === "summary") return summaryHTML();
-  if (cap.phase === "setup" || cap.phase === "ready-error") {
-    let h = sessionBar() + `<h1>New run</h1>`;
-    if (cap.error) h += `<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">${esc(cap.error)}</b></div>`;
-    h += `<div class="seg" style="margin-bottom:14px"><button data-act="cap-mode" data-v="sprint" aria-pressed="${cap.mode === "sprint"}">Sprint</button><button data-act="cap-mode" data-v="vault" aria-pressed="${cap.mode === "vault"}">Vault</button></div>`;
-    h += `<div class="label" style="margin:6px 0 8px">Who's running</div>${athletePicker()}`;
-    if (cap.mode === "sprint") {
-      h += `<div class="label" style="margin:18px 0 8px">Stop at</div><div class="chips">${[10, 20, 30, 40, 60].map((d) => `<button class="chip" data-act="cap-target" data-v="${d}" aria-pressed="${cap.target === d}">${d} m</button>`).join("")}
-        <span class="row" style="gap:6px"><input type="number" id="customTarget" inputmode="numeric" min="5" max="80" placeholder="Other" style="width:90px" value="${[10, 20, 30, 40, 60].includes(cap.target) ? "" : cap.target}"><span class="muted">m</span></span></div>
-        <div class="card" style="margin-top:14px"><div class="small muted">Recording starts by itself when the athlete moves and stops at the distance you set. The clock starts once movement is confirmed (speed passes 0.2 m/s), so a small rock or lean before the start doesn't count.</div></div>`;
-    } else {
-      const pole = !!SETUPS[cap.setup].pole, far = SETUPS[cap.setup].boxFt === 150;
-      const pick = (p, f) => (p ? "polerun" : "runway") + (f ? "150" : "100");
-      h += `<div class="label" style="margin:18px 0 8px">Where</div><div class="grid2">
-          <button class="opt" data-act="cap-setup" data-v="${pick(false, far)}" aria-pressed="${!pole}"><b>On the runway</b><span>Jumping into the box</span></button>
-          <button class="opt" data-act="cap-setup" data-v="${pick(true, far)}" aria-pressed="${pole}"><b>Off the runway</b><span>Pole runs, no box</span></button></div>
-        <div class="label" style="margin:14px 0 8px">Tripod distance</div><div class="grid2">
-          <button class="opt" data-act="cap-setup" data-v="${pick(pole, false)}" aria-pressed="${!far}"><b>100 ft</b><span>Short approach</span></button>
-          <button class="opt" data-act="cap-setup" data-v="${pick(pole, true)}" aria-pressed="${far}"><b>150 ft</b><span>Long approach</span></button></div>`;
-      h += setupGuide(cap.setup);
-    }
-    h += `<div class="card" style="margin-top:6px"><b>Ready chime</b><div class="small muted">Plays every time an athlete has stood in long enough and the sensor is armed. Turn the phone volume up: it plays with the silent switch on and through a Bluetooth speaker.</div>
-      <div class="between" style="margin-top:10px;gap:8px;flex-wrap:wrap"><div class="chips">${[["original", "Original"], ["gatecam", "GateCamLive"]].map(([k, l]) => `<button class="chip sm" data-act="chime-kind" data-v="${k}" aria-pressed="${(CHIMES[settings.chime] ? settings.chime : "original") === k}">${l}</button>`).join("")}</div><button class="btn sm" data-act="chime-test">▶ Play chime</button></div></div>
-    ${voiceCard()}
-    <div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Saves every run and gets ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>`;
-    const q = cap.queue;
-    h += `<button class="btn big primary" data-act="cap-ready" ${q.length ? "" : "disabled"}>${!q.length ? "Pick who's running" : q.length === 1 ? `Get ready · ${esc(athleteById(q[0]).name)}` : `Start · ${q.length} athletes taking turns`}</button>`;
-    return h;
-  }
+  if (cap.phase === "setup" || cap.phase === "ready-error") return wizardHTML();
   const test = cap.mode === "sprint" ? `${cap.target} m sprint` : SETUPS[cap.setup].name, rule = armRule(), name = esc(a ? a.name : "");
   const lastBlock = () => {
     const r = cap.lastRun; if (!r) return "";
@@ -1186,7 +1211,8 @@ function analyticsHTML() {
   if (!athletes.length) return `<h1>Analytics</h1><div class="card empty">Add an athlete and save some runs to see trends.</div>`;
   if (!anState.athleteId || !athletes.find((a) => a.id === anState.athleteId)) anState.athleteId = settings.lastAthlete && athletes.find((a) => a.id === settings.lastAthlete) ? settings.lastAthlete : athletes[0].id;
   const mine = runs.filter((r) => r.athleteId === anState.athleteId);
-  let h = `<h1>Analytics</h1><div class="chips" style="margin-bottom:12px">${athletes.map((a) => `<button class="chip" data-act="an-ath" data-id="${a.id}" aria-pressed="${a.id === anState.athleteId}">${esc(a.name)}</button>`).join("")}</div>`;
+  const anReady = runs.some((r) => r.athleteId === anState.athleteId);
+  let h = `<div class="between" style="align-items:center"><h1>Analytics</h1>${anReady ? `<button class="btn sm" data-act="an-report" aria-label="Print report">Print report</button>` : ""}</div><div class="chips" style="margin-bottom:12px">${athletes.map((a) => `<button class="chip" data-act="an-ath" data-id="${a.id}" aria-pressed="${a.id === anState.athleteId}">${esc(a.name)}</button>`).join("")}</div>`;
   if (!mine.length) return h + `<div class="card empty">No runs for ${esc(athleteById(anState.athleteId).name)} yet.</div>`;
   const tests = [...new Set(mine.map(testKey))].sort();
   if (!anState.test || !tests.includes(anState.test)) anState.test = tests[0];
@@ -1217,6 +1243,7 @@ function analyticsHTML() {
   } else {
     h += rec("Last 5 m", (r) => r.res.last5 && r.res.last5.speed, "high", (v) => `${f2(v)} m/s`) + rec("Top speed", (r) => r.res.top.speed, "high", (v) => `${f2(v)} m/s`);
   }
+  { const kg = tr.some((r) => r.res.fv && r.res.fv.P0abs); h += rec("Power", (r) => r.res.fv && (kg ? r.res.fv.P0abs : r.res.fv.P0), "high", (v) => (kg ? `${Math.round(v)} W` : `${f1(v)} W/kg`)); }
   h += `</div></div>`;
   // what matters for this test
   h += isSprint ? sprintProfileCard(mine, tr) : vaultProfileCard(tr);
@@ -1249,7 +1276,7 @@ function settingsHTML() {
     : "Open the app from its home-screen icon so the phone never clears it on its own. Runs saved in a browser tab can be cleared after a week without visiting.";
   let h = `<h1>Settings</h1>`;
   h += `<h2>Athletes</h2><div class="card list">${athletes.length ? athletes.map((a) => `<div class="item" data-act="ath-edit" data-id="${a.id}"><div><b>${esc(a.name)}</b><div class="small muted">${a.kg ? (settings.weightUnit === "lb" ? `${Math.round(a.kg / 0.453592)} lb` : `${a.kg.toFixed(1)} kg`) : "No body weight"}</div></div><div class="r">›</div></div>`).join("") : `<div class="muted">No athletes yet.</div>`}</div><button class="btn" data-act="ath-new">Add athlete</button>`;
-  h += `<h2>Results</h2><div class="card between"><div><b>Hands Free Mode</b><div class="small muted">Save every run and get ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>${voiceCard()}
+  h += `<h2>Sound and Hands Free</h2>${chimeCard()}<div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Save every run and get ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>${voiceCard()}
     <div class="card between"><div><b>Body weight in</b></div><div class="seg" style="width:140px"><button data-act="unit" data-v="lb" aria-pressed="${settings.weightUnit === "lb"}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${settings.weightUnit === "kg"}">kg</button></div></div>
     <div class="card between"><div><b>Look</b></div><div class="seg" style="width:200px"><button data-act="theme" data-v="" aria-pressed="${!settings.theme}">Auto</button><button data-act="theme" data-v="dark" aria-pressed="${settings.theme === "dark"}">Dark</button><button data-act="theme" data-v="light" aria-pressed="${settings.theme === "light"}">Light</button></div></div>`;
   h += `<h2>Vault setup</h2>${setupGuide("runway100")}${setupGuide("runway150")}`;
@@ -1281,7 +1308,7 @@ function render() {
   document.querySelectorAll(".tabbar [data-go]").forEach((b) => (b.dataset.go === tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
   const sw = $("#soloSw"); if (sw) sw.onchange = () => { settings.solo = sw.checked; saveSettings(); if (sw.checked) unlockAudio(); };
   const vs = $("#voiceSw"); if (vs) vs.onchange = () => { settings.voice = vs.checked; saveSettings(); unlockAudio(); if (vs.checked) say("Voice on"); };
-  const ct = $("#customTarget"); if (ct) ct.onchange = () => { const v = parseInt(ct.value, 10); if (v >= 5 && v <= 80) { cap.target = v; settings.lastTarget = v; saveSettings(); render(); } };
+  const ct = $("#customTarget"); if (ct) ct.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); const b = document.querySelector('[data-act="cap-target-custom"]'); if (b) b.click(); } };
   const imp = $("#importFile"); if (imp) imp.onchange = () => importBackup(imp.files[0]);
   const sf = $("#syncFile"); if (sf) sf.onchange = () => importBackup(sf.files[0]);
 }
@@ -1304,9 +1331,14 @@ document.addEventListener("click", (e) => {
     case "cap-end": stopNow(); cap.phase = "summary"; render(); window.scrollTo(0, 0); break;
     case "cap-close": cap.session = null; saveSession(); cap.phase = "setup"; go("home"); break;
     case "cmp-report": { const t = anState.test, ids = (anState.cmp || []).filter((x) => runs.some((r) => r.athleteId === x && testKey(r) === t)); if (ids.length > 1) openCompareReport(t, ids); else toast("Pick at least two athletes to compare."); break; }
+    case "an-report": if (anState.athleteId && anState.test) openAthleteReport(anState.athleteId, anState.test); break;
     case "session-report": if (cap.session) openSessionReport(cap.session.ids); break;
-    case "cap-mode": cap.mode = v; settings.lastMode = v; saveSettings(); render(); break;
-    case "cap-target": cap.target = +v; settings.lastTarget = +v; saveSettings(); render(); break;
+    case "cap-mode": cap.mode = v; settings.lastMode = v; saveSettings(); cap.step = "distance"; cap.error = null; render(); window.scrollTo(0, 0); break;
+    case "cap-target": cap.target = +v; settings.lastTarget = +v; saveSettings(); cap.step = "who"; render(); window.scrollTo(0, 0); break;
+    case "cap-target-custom": { const ct = $("#customTarget"), n = ct ? parseInt(ct.value, 10) : NaN; if (n >= 5 && n <= 80) { cap.target = n; settings.lastTarget = n; saveSettings(); cap.step = "who"; render(); window.scrollTo(0, 0); } else toast("Pick a distance, or type one from 5 to 80 m."); break; }
+    case "wiz-next": cap.step = WIZ[Math.min(WIZ.length - 1, WIZ.indexOf(cap.step) + 1)]; render(); window.scrollTo(0, 0); break;
+    case "wiz-back": cap.step = WIZ[Math.max(0, WIZ.indexOf(cap.step) - 1)]; cap.error = null; render(); window.scrollTo(0, 0); break;
+    case "wiz-edit": cap.step = "event"; render(); window.scrollTo(0, 0); break;
     case "cap-setup": cap.setup = v; settings.lastSetup = v; saveSettings(); render(); break;
     case "cap-ready": unlockAudio(); cap.lastRun = null; if (!cap.queue.includes(cap.athleteId)) cap.athleteId = cap.queue[0]; if (!cap.session) { cap.session = { start: Date.now(), ids: [] }; saveSession(); } arm(); break;
     case "cap-cancel": stopNow(); cap.phase = "setup"; cap.sim = null; render(); break;
@@ -1455,7 +1487,7 @@ function addDemoData() {
         const res = Engine.process(s.raw, { mode: "sprint", target: 30, mass: a.kg });
         if (!res.error) runs.push({ id: uid(), ts, athleteId: a.id, mode: "sprint", target: 30, res, sim: true });
         const setup = ["runway100", "runway150", "polerun100"][(day / 3 + rep) % 3 | 0];
-        const steps = setup === "runway150" ? 19 + (rep % 2) : 15 + (rep % 2);
+        const steps = 2 * (setup === "runway150" ? 9 + (rep % 2) : 7 + (rep % 2)) + 1;   // start + an even number of steps
         const carry = 0.55 + (name.endsWith("2") ? 0.25 : 0) + Math.random() * 0.2;
         const sv = Engine.simulate({ seed: Math.floor(Math.random() * 1e6) + 1, vmax: vmax - carry, steps, back: 2.5, popup: !!SETUPS[setup].pole, flight: 0.55 });
         const ctx = { mode: "vault", setup, mass: a.kg };

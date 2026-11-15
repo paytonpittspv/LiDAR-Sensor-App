@@ -342,7 +342,10 @@ const Engine = (() => {
     const takeoffK = ctx.mode === "vault" && stepKs.length ? stepKs[stepKs.length - 1] : null;
     res.steps = {
       counted: stepKs.length,
-      lefts: Math.ceil(stepKs.length / 2),
+      // vault counting: you start on the mark and the first step is a right, so L1 is the first left after it.
+      // With an odd number of steps the earliest one is a left before any right: that's the step off the
+      // start mark, not a counted left.
+      lefts: Math.floor(stepKs.length / 2),
       times: stepKs.map((k) => +(k / fs - tGo).toFixed(3)),
       firstAt: stepKs.length ? +(L.ds[stepKs[0]] - dGo).toFixed(2) : null,
     };
@@ -422,8 +425,9 @@ const Engine = (() => {
       }
       res.contacts = kc.map((kEst, i) => {
         const k0 = kEst, k = Math.max(0, Math.min(n - 1, Math.round(k0)));
-        const fromEnd = nC - 1 - i, left = fromEnd % 2 === 0, lead = fromEnd === 0 ? LEAD_TO : LEAD_STEP;
-        return { t: +(k0 / fs - tGo).toFixed(3), left, takeoff: fromEnd === 0, out: left ? fromEnd / 2 : null, n: left ? res.steps.lefts - fromEnd / 2 : null,
+        const fromEnd = nC - 1 - i, lead = fromEnd === 0 ? LEAD_TO : LEAD_STEP;
+        const first = fromEnd % 2 === 0 && res.steps.lefts - fromEnd / 2 < 1, left = fromEnd % 2 === 0 && !first;
+        return { t: +(k0 / fs - tGo).toFixed(3), left, first, takeoff: fromEnd === 0, out: left ? fromEnd / 2 : null, n: left ? res.steps.lefts - fromEnd / 2 : null,
           boxFt: boxM ? +((boxM - (L.ds[k] + lead)) / FT).toFixed(2) : null, startFt: +((L.ds[k] - dGo + lead) / FT).toFixed(2), v: +L.vStride[k].toFixed(3) };
       });
       res.last5 = dTo - 5 >= dGo ? seg(dTo - 5, dTo) : null;

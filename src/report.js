@@ -188,7 +188,7 @@ function vaultSteps(R, run) {
   const to = cs.length ? spotFt(run, cs[cs.length - 1]) : 0;
   cs.forEach((c, i) => {
     const spot = spotFt(run, c), kk = Math.max(0, R.curve.t.findIndex((x) => x >= c.t));
-    out.push({ i, left: c.left, num: c.n, t: c.t, dt: i ? c.t - cs[i - 1].t : null, spot, ft: Math.abs(box ? spot - to : to - spot), speed: c.v != null ? c.v : R.curve.v[kk], takeoff: c.takeoff });
+    out.push({ i, left: c.left, first: c.first, num: c.n, t: c.t, dt: i ? c.t - cs[i - 1].t : null, spot, ft: Math.abs(box ? spot - to : to - spot), speed: c.v != null ? c.v : R.curve.v[kk], takeoff: c.takeoff });
   });
   out.forEach((s, i) => { s.lenFt = i ? Math.abs(out[i - 1].spot - s.spot) : null; });
   return out;
@@ -268,7 +268,7 @@ function vaultReport(run) {
     ${footer(1, 2)}</div>`;
 
   // ---- page 2 ----
-  const rows = steps.map((s) => `<tr class="${s.left ? "lrow" : ""}"><td>${s.i + 1}</td><td>${s.left ? `<b>L${s.num}${s.takeoff ? " · TO" : ""}</b>` : "R"}</td><td><b>${ftLabel(s.spot)}</b></td><td>${s.lenFt != null ? ftLabel(s.lenFt) : "–"}</td><td>${s.dt != null ? f2(s.dt) + " s" : "–"}</td><td><b>${f2(s.speed)}</b></td></tr>`).join("");
+  const rows = steps.map((s) => `<tr class="${s.left ? "lrow" : ""}"><td>${s.i + 1}</td><td>${s.left ? `<b>L${s.num}${s.takeoff ? " · TO" : ""}</b>` : s.first ? `<span style="color:${INK2}">L · off the mark</span>` : "R"}</td><td><b>${ftLabel(s.spot)}</b></td><td>${s.lenFt != null ? ftLabel(s.lenFt) : "–"}</td><td>${s.dt != null ? f2(s.dt) + " s" : "–"}</td><td><b>${f2(s.speed)}</b></td></tr>`).join("");
   const lefts = steps.filter((s) => s.left), lastL = lefts.slice(-3);
   const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
   const lenEnd = avg(steps.slice(-6).filter((s) => s.lenFt != null).map((s) => s.lenFt)), lenMid = avg(steps.slice(-12, -6).filter((s) => s.lenFt != null).map((s) => s.lenFt));
@@ -399,6 +399,7 @@ function compareStats(aid, test) {
   } else {
     const sTop = sprintTopFor(aid); o.sprintTop = sTop ? sTop.v : null; o.carry = sTop && o.avg ? o.avg / sTop.v : null;
     o.lefts = modeOf(tr.map((r) => r.res.steps.lefts).filter(Boolean));
+    { const pw = tr.map((r) => r.res.fv && (r.res.fv.P0abs || null)).filter(Boolean); o.power = pw.length ? Math.max(...pw) : null; }
     const TO = tr.map((r) => r.res.takeoff.outFt).filter((x) => x != null), SM = tr.map((r) => r.res.startMarkFt).filter((x) => x != null);
     o.to = avgOf(TO); o.toSd = sdOf(TO); o.sm = avgOf(SM); o.smSd = sdOf(SM);
     const fz = tr.map((r) => r.res.finish && r.res.finish.change).filter((x) => x != null && isFinite(x)); o.into = avgOf(fz); o.slowed = fz.filter((x) => x <= -0.1).length; o.intoN = fz.length;
@@ -490,6 +491,7 @@ function compareReport(test, ids) {
     ["Best top speed", (o) => o.top && o.top.v, (v) => f2(v), "m/s", "high"],
     ["Carry (avg last 5 m ÷ sprint top)", (o) => o.carry, (v) => Math.round(v * 100) + "%", "", "high"],
     ["Into the box (avg change)", (o) => o.into, (v) => signed(v), "m/s", "high"],
+    ["Peak power", (o) => o.power, (v) => Math.round(v), "W", "high"],
     ["Lefts (most often)", (o) => o.lefts, (v) => v, "", null],
     ["Takeoff from the box", (o) => o.to, (v) => ftLabel(v), "", null],
     ["Takeoff spread", (o) => o.toSd, (v) => spreadFt(v), "", "low"],
@@ -571,6 +573,99 @@ function layoutReport(el) {
     while (room() < 4 && k > 0.72) { k -= 0.02; body.style.zoom = k.toFixed(2); }
   });
   if (!el._resize) { el._resize = true; window.addEventListener("resize", () => { if (!el.classList.contains("hidden")) scale(); }); }
+}
+
+// ---------- athlete report (Analytics > Print report): one athlete, one test, over time; watts included ----------
+const wattsOf = (r) => { const f = r.res.fv; return f ? { w: f.P0abs || null, wkg: f.P0 } : null; };
+function athleteReport(aid, test) {
+  const isS = test.startsWith("sprint"), km = keyMetric(test), setup = isS ? null : test.split("-")[1], a = athleteById(aid);
+  const tr = runs.filter((r) => r.athleteId === aid && testKey(r) === test && !r.res.error).sort((x, y) => x.ts - y.ts);
+  const vals = tr.map(km.pick).filter((v) => v != null && isFinite(v));
+  const best = bestOf(tr, km.pick, "high"), avg = avgOf(vals), sd = sdOf(vals);
+  const top = bestOf(tr, (r) => r.res.top.speed, "high"), fly = isS ? bestOf(tr, (r) => r.res.fly10 && r.res.fly10.time, "low") : null;
+  const pw = bestOf(tr, (r) => { const w = wattsOf(r); return w ? (w.w || w.wkg) : null; }, "high"), hasKg = tr.some((r) => r.res.fv && r.res.fv.P0abs);
+  const dfmt = (ts) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const t0 = tr[0].ts, t1 = tr[tr.length - 1].ts, oneYear = new Date(t0).getFullYear() === new Date(t1).getFullYear();
+  const sdate = (ts) => new Date(ts).toLocaleDateString([], oneYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "2-digit" });
+  const head = `<div class="rhead"><span>LiDAR SENSOR</span><span>ATHLETE REPORT</span></div>`;
+  const m = (k, v, u, sub, cls) => `<div class="m ${cls || ""}"><div class="k">${k}</div><div class="v">${v}${u ? `<small>${u}</small>` : ""}</div>${sub ? `<div class="k" style="margin-top:2px">${sub}</div>` : ""}</div>`;
+  // per session: best key metric and best watts
+  const byK = bestPerDay(tr, km.pick), days = [...new Set(tr.map((r) => dayKey(r.ts)))].sort();
+  const dx = (k) => (new Date(k).getTime() - new Date(days[0]).getTime()) / 864e5, xEnd = Math.max(1, dx(days[days.length - 1]));
+  const xt = []; { const n = Math.min(6, days.length); for (let i = 0; i < n; i++) xt.push(n === 1 ? 0 : (xEnd * i) / (n - 1)); }
+  const xfmt = (t) => new Date(new Date(days[0]).getTime() + t * 864e5 + 12 * 36e5).toLocaleDateString([], { month: "short", day: "numeric" });
+  const kd = Object.keys(byK).sort(), KX = kd.map(dx), KY = kd.map((d) => byK[d].v);
+  const kpad = Math.max(0.1, (Math.max(...KY) - Math.min(...KY)) * 0.25), kyt = niceTicks(Math.min(...KY) - kpad, Math.max(...KY) + kpad, 5);
+  const trend = svgChart({ aria: "Best per session", w: 730, h: 170, pad: [44, 14, 10, 30], x0: -0.4, x1: xEnd + 0.4, y0: Math.min(...KY) - kpad, y1: Math.max(...KY) + kpad, font: 11, textColor: INK2, gridColor: "#efecf6",
+    xt, xfmt, yt: kyt.filter((t) => t >= Math.min(...KY) - kpad && t <= Math.max(...KY) + kpad), yfmt: (t) => t.toFixed(1), yl: "m/s", series: [{ x: KX, y: KY, color: ACC, w: 2.4 }], dots: KX.map((x, i) => ({ x, y: KY[i], r: 3.6, fill: "#fff", stroke: ACC, sw: 1.9 })) });
+  const byW = bestPerDay(tr, (r) => { const w = wattsOf(r); return w ? (hasKg ? w.w : w.wkg) : null; }), wd = Object.keys(byW).sort();
+  let wchart = `<div style="color:${INK2};font-size:12px;padding:10px 0">Power needs a run-up of about 20 m or more.</div>`;
+  if (wd.length) {
+    const WX = wd.map(dx), WY = wd.map((d) => byW[d].v), wpad = Math.max(hasKg ? 20 : 0.3, (Math.max(...WY) - Math.min(...WY)) * 0.25), wyt = niceTicks(Math.min(...WY) - wpad, Math.max(...WY) + wpad, 4);
+    wchart = svgChart({ aria: "Power per session", w: 730, h: 130, pad: [44, 14, 10, 30], x0: -0.4, x1: xEnd + 0.4, y0: Math.min(...WY) - wpad, y1: Math.max(...WY) + wpad, font: 11, textColor: INK2, gridColor: "#efecf6",
+      xt, xfmt, yt: wyt.filter((t) => t >= Math.min(...WY) - wpad && t <= Math.max(...WY) + wpad), yfmt: (t) => (hasKg ? Math.round(t) : t.toFixed(1)), series: [{ x: WX, y: WY, color: ACC3, w: 2.2 }], dots: WX.map((x, i) => ({ x, y: WY[i], r: 3.2, fill: "#fff", stroke: ACC3, sw: 1.8 })) });
+  }
+  // takeaways
+  const notes = [];
+  if (kd.length > 1) { const ch = KY[KY.length - 1] - KY[0]; notes.push(`${km.label[0].toUpperCase() + km.label.slice(1)}: ${B(f2(KY[KY.length - 1]) + " m/s")} at the latest session, ${ch >= 0 ? "up" : "down"} ${f2(Math.abs(ch))} m/s from the first (${f2(KY[0])}).`); }
+  if (best) notes.push(`Best ${km.label} ${B(f2(best.v) + " m/s")}${isS ? ` (${f1(mph(best.v))} mph)` : ""} on ${dfmt(best.r.ts)}; average ${f2(avg)} m/s${sd != null ? `, varying ±${f2(sd)} m/s run to run` : ""}.`);
+  if (pw) { const w = wattsOf(pw.r); notes.push(`Peak horizontal power ${B(hasKg && w.w ? Math.round(w.w) + " W" : f1(w.wkg) + " W/kg")}${hasKg && w.w ? ` (${f1(w.wkg)} W/kg)` : ""}. More power at the same body weight means a faster build to top speed.`); }
+  if (isS) {
+    if (fly) notes.push(`Fastest flying 10 m ${B(f2(fly.v) + " s")}.`);
+    const st = tr.filter((r) => r.res.stride); if (st.length) notes.push(`At top speed: ${f2(avgOf(st.map((r) => r.res.stride.freq)))} steps/s × ${f2(avgOf(st.map((r) => r.res.stride.length)))} m per step on average.`);
+  } else {
+    const sTop = sprintTopFor(aid); if (sTop && avg) notes.push(`Carries ${B(Math.round((avg / sTop.v) * 100) + "%")} of sprint top speed (${f2(sTop.v)} m/s) into the last 5 m on average.`);
+    const L = tr.map((r) => r.res.steps.lefts).filter(Boolean), TO = tr.map((r) => r.res.takeoff.outFt).filter((x) => x != null);
+    if (L.length) notes.push(`Usually ${B(modeOf(L) + " lefts")}; takeoff ${TO.length ? ftLabel(avgOf(TO)) + " out" : "—"}${TO.length > 1 ? ` (${spreadFt(sdOf(TO))})` : ""}.`);
+  }
+  const pages = 2;
+  const p1 = `<div class="page">${head}
+    <div class="box btop">${brandBlock(`Athlete report<br>TF03 LiDAR · 1000 Hz · <b style="color:${INK}">${UNC}</b>`)}
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:12px;gap:12px;flex-wrap:wrap">
+        <div><div class="eyebrow">${testName(test).toUpperCase()}</div><div class="who">${esc(a.name)}</div></div>
+        <div style="color:${INK2};font-size:13px;text-align:right">${dfmt(t0)}${dayKey(t0) !== dayKey(t1) ? ` – ${dfmt(t1)}` : ""}<br>${tr.length} run${tr.length > 1 ? "s" : ""} · ${days.length} session${days.length > 1 ? "s" : ""}${a.kg ? ` · ${a.kg} kg` : ""}</div></div>
+      <div class="metrics" style="grid-template-columns:1.35fr 1fr 1fr 1fr">
+        <div class="m hero" style="grid-row:auto"><div class="k">Best ${km.label}</div><div class="v" style="font-size:40px">${best ? f2(best.v) : "—"}<small style="font-size:16px">m/s</small></div><div class="k">${best ? `${isS ? f1(mph(best.v)) + " mph · " : ""}${dfmt(best.r.ts)}` : ""}</div></div>
+        ${m("Average", f2(avg), "m/s", sd != null ? `±${f2(sd)} run to run` : "", "")}
+        ${isS ? m("Fastest fly 10 m", fly ? f2(fly.v) : "—", "s", fly ? dfmt(fly.r.ts) : "") : m("Best top speed", top ? f2(top.v) : "—", "m/s", top ? dfmt(top.r.ts) : "")}
+        ${m("Power", pw ? (hasKg && wattsOf(pw.r).w ? Math.round(wattsOf(pw.r).w) : f1(wattsOf(pw.r).wkg)) : "—", pw ? (hasKg && wattsOf(pw.r).w ? "W" : "W/kg") : "", pw ? (hasKg && wattsOf(pw.r).w ? `${f1(wattsOf(pw.r).wkg)} W/kg · peak horizontal` : "add body weight for watts") : "needs ~20 m run-up", "hl")}
+      </div></div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Best ${km.label} per session</h4><span style="color:${INK2};font-size:11px">higher is better</span></div>${trend}</div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Power per session · ${hasKg ? "watts" : "W/kg"}</h4><span style="color:${INK2};font-size:11px">peak horizontal power, best run of the day</span></div>${wchart}</div>
+    <div class="box"><h4>Key takeaways</h4><ul class="sum">${notes.slice(0, 6).map((n) => `<li>${n}</li>`).join("")}</ul></div>
+    ${footer(1, pages)}</div>`;
+  // page 2: every run, and for vaults where the lefts land
+  const recent = tr.slice(-18).reverse();
+  const wcell = (r) => { const w = wattsOf(r); return w ? (w.w ? Math.round(w.w) : f1(w.wkg) + "/kg") : "–"; };
+  const cols = isS
+    ? [["Date", (r) => sdate(r.ts)], ["Top speed", (r) => f2(r.res.top.speed)], ["Time", (r) => f2(r.res.time) + " s"], ["Fly 10", (r) => (r.res.fly10 ? f2(r.res.fly10.time) + " s" : "–")], ["Top at", (r) => (isFinite(r.res.top.dist) ? f1(r.res.top.dist) + " m" : "–")], ["Watts", wcell]]
+    : [["Date", (r) => sdate(r.ts)], ["Last 5 m", (r) => (r.res.last5 ? f2(r.res.last5.speed) : "–")], ["Top", (r) => f2(r.res.top.speed)], ["Into box", (r) => (r.res.finish ? signed(r.res.finish.change) : "–")], ["Lefts", (r) => r.res.steps.lefts || "–"], ["Takeoff", (r) => (r.res.takeoff.outFt != null ? ftLabel(r.res.takeoff.outFt) : "–")], ["Start", (r) => (r.res.startMarkFt != null ? ftLabel(r.res.startMarkFt) : "–")], ["Watts", wcell]];
+  const bestId = best ? best.r.id : null;
+  const tbl = `<table class="ctab"><thead><tr>${cols.map(([k]) => `<th>${k}</th>`).join("")}</tr></thead><tbody>${recent.map((r) => `<tr>${cols.map(([, f], i) => `<td class="${i === 1 && r.id === bestId ? "lead" : ""}">${f(r)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  let extra = "";
+  if (!isS) {
+    const jumps = tr.slice(-6).reverse();
+    extra = `<div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Where the lefts land · last ${jumps.length} jump${jumps.length > 1 ? "s" : ""}</h4><span style="color:${INK2};font-size:11px">feet from the ${SETUPS[setup] && SETUPS[setup].pole ? "box mark" : "box"}</span></div>
+      <div class="rmap">${runwayMap(jumps.map((r) => ({ run: r, label: new Date(r.ts).toLocaleDateString([], { month: "short", day: "numeric" }) })), { mid: settings.midOut, W: 580, laneH: 21, gutter: 70 })}</div></div>`;
+  } else {
+    let rows = "";
+    for (const x of [10, 20, 30, 40, 50, 60]) {
+      let bc = null; for (const r of tr) { if (r.target < x) continue; const tc = x === r.target ? r.res.time : interpAt(r.res.curve.d, r.res.curve.t, x); if (isFinite(tc) && (!bc || tc < bc.v)) bc = { v: tc, r }; }
+      if (bc) rows += `<tr><td>${x} m</td><td>${f2(bc.v)} s</td><td>${dfmt(bc.r.ts)}</td></tr>`;
+    }
+    if (rows) extra = `<div class="box"><h4>Fastest at each distance</h4><table class="ctab"><thead><tr><th>Distance</th><th>Time from the start</th><th>When</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  const p2 = `<div class="page">${head}
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Runs${tr.length > recent.length ? ` · latest ${recent.length} of ${tr.length}` : ""}</h4><span style="color:${INK2};font-size:11px">best ${km.label} in pink${hasKg ? "" : " · watts per kg until body weight is added"}</span></div>${tbl}</div>
+    ${extra}
+    ${footer(2, pages)}</div>`;
+  return p1 + p2;
+}
+function openAthleteReport(aid, test) {
+  const el = $("#report");
+  el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + athleteReport(aid, test);
+  el.classList.remove("hidden"); el.scrollTop = 0;
+  layoutReport(el);
 }
 
 function openReport(id) {
