@@ -71,7 +71,10 @@ h3{font-size:15px;margin:14px 0 6px}
 .mapkey{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;font-size:11.5px;color:var(--muted);margin:6px 0 10px}.mapkey span{display:inline-flex;align-items:center;gap:5px}.mapkey svg{width:auto}
 .wiz-top{display:flex;justify-content:space-between;align-items:center;min-height:34px;margin-top:2px}
 .wiz-bar{display:flex;gap:6px;margin:8px 0 14px}.wiz-bar i{flex:1;height:4px;border-radius:2px;background:var(--line)}
-.wiz-bar i.on{background:linear-gradient(90deg,var(--pink),var(--purple))}
+.wiz-bar i:nth-child(1).on{background:var(--pink)}.wiz-bar i:nth-child(2).on{background:var(--purple)}.wiz-bar i:nth-child(3).on{background:var(--blue)}
+.wiz-back{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:15px;padding:8px 16px 8px 11px;border-radius:999px;
+  border:1.5px solid var(--purple);background:var(--card2);color:var(--text);cursor:pointer}
+.wiz-back svg{width:16px;height:16px;color:var(--purple)}.wiz-back:active{transform:scale(.97)}
 .btn.ghost{background:none;border-color:transparent;padding-left:0;color:var(--muted)}
 .tiles{display:grid;grid-template-columns:1fr;gap:12px}@media (min-width:560px){.tiles{grid-template-columns:1fr 1fr}}
 .tile{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:20px 18px;border-radius:18px;border:1.5px solid var(--line);background:var(--card);cursor:pointer;min-height:132px}
@@ -1774,7 +1777,7 @@ function wizardHTML() {
   const i = WIZ.indexOf(cap.step), vault = cap.mode === "vault";
   const titles = { event: "Choose event", distance: vault ? "Distance and Sensor Placement" : "Distance", who: "Who's running?" };
   const subs = { event: "", distance: vault ? "Where you're jumping and how far the tripod is from the box." : "Where the run stops being recorded.", who: "" };
-  let h = sessionBar() + `<div class="wiz-top">${i ? `<button class="btn sm ghost" data-act="wiz-back">‹ Back</button>` : `<span></span>`}<span class="small muted">Step ${i + 1} of ${WIZ.length}</span></div>
+  let h = sessionBar() + `<div class="wiz-top">${i ? `<button class="wiz-back" data-act="wiz-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>Back</button>` : `<span></span>`}<span class="small muted">Step ${i + 1} of ${WIZ.length}</span></div>
     <div class="wiz-bar" aria-hidden="true">${WIZ.map((_, k) => `<i class="${k <= i ? "on" : ""}"></i>`).join("")}</div>
     <h1 style="margin-bottom:4px">${titles[cap.step]}</h1>${subs[cap.step] ? `<div class="muted" style="margin-bottom:14px">${subs[cap.step]}</div>` : `<div style="height:10px"></div>`}`;
   if (cap.error) h += `<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">${esc(cap.error)}</b></div>`;

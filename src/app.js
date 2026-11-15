@@ -930,7 +930,7 @@ function wizardHTML() {
   const i = WIZ.indexOf(cap.step), vault = cap.mode === "vault";
   const titles = { event: "Choose event", distance: vault ? "Distance and Sensor Placement" : "Distance", who: "Who's running?" };
   const subs = { event: "", distance: vault ? "Where you're jumping and how far the tripod is from the box." : "Where the run stops being recorded.", who: "" };
-  let h = sessionBar() + `<div class="wiz-top">${i ? `<button class="btn sm ghost" data-act="wiz-back">‹ Back</button>` : `<span></span>`}<span class="small muted">Step ${i + 1} of ${WIZ.length}</span></div>
+  let h = sessionBar() + `<div class="wiz-top">${i ? `<button class="wiz-back" data-act="wiz-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>Back</button>` : `<span></span>`}<span class="small muted">Step ${i + 1} of ${WIZ.length}</span></div>
     <div class="wiz-bar" aria-hidden="true">${WIZ.map((_, k) => `<i class="${k <= i ? "on" : ""}"></i>`).join("")}</div>
     <h1 style="margin-bottom:4px">${titles[cap.step]}</h1>${subs[cap.step] ? `<div class="muted" style="margin-bottom:14px">${subs[cap.step]}</div>` : `<div style="height:10px"></div>`}`;
   if (cap.error) h += `<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">${esc(cap.error)}</b></div>`;
