@@ -1,20 +1,32 @@
-// Offline support for the web copy of the app (GitHub Pages). The sensor serves its own copy over
-// plain http, where browsers don't run service workers, so this only matters on the web.
+// Offline support. Two places serve the app over https:
+//   sensor.paytonpittsdesigns.com  the sensor itself (only reachable on its Wi-Fi): open from the saved copy
+//                                  straight away, and update that copy in the background whenever the sensor is there
+//   GitHub Pages                   newest from the network when online, the saved copy when offline
 const VERSION = "a9268b3736";
 const CACHE = "lidar-sensor-" + VERSION;
+const SENSOR = "sensor.paytonpittsdesigns.com";
+const onSensor = self.location.hostname === SENSOR;
 const ASSETS = ["./", "index.html", "manifest.webmanifest", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/favicon-32.png"];
+const API = /^\/(live|arm|stop|data|tls|cert|csr)(\/|$)/;
 
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith("lidar-sensor-") && k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
+const save = (res) => { if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put("index.html", copy)); } return res; };
 self.addEventListener("fetch", (e) => {
-  const req = e.request;
-  if (req.method !== "GET" || new URL(req.url).origin !== location.origin) return;
+  const req = e.request, url = new URL(req.url);
+  if (req.method !== "GET" || url.origin !== location.origin || API.test(url.pathname)) return;   // sensor calls always go live
   if (req.mode === "navigate") {
-    // the app page: newest from the network when online, the saved copy when offline
-    e.respondWith(fetch(req).then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put("index.html", copy)); return res; })
-      .catch(() => caches.match("index.html").then((r) => r || caches.match("./"))));
+    if (onSensor) {
+      e.respondWith(caches.match("index.html").then((hit) => {
+        const net = fetch(req).then(save);
+        if (hit) { e.waitUntil(net.catch(() => {})); return hit; }
+        return net.catch(() => caches.match("./"));
+      }));
+    } else {
+      e.respondWith(fetch(req).then(save).catch(() => caches.match("index.html").then((r) => r || caches.match("./"))));
+    }
     return;
   }
   e.respondWith(caches.match(req).then((hit) => hit || fetch(req)));
