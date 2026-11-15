@@ -1,0 +1,17 @@
+name: Probe
+on: { push: { branches: [https-probe] } }
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.0.7
+      - run: arduino-cli compile --fqbn "esp32:esp32:esp32:PartitionScheme=huge_app" --warnings default probe/Probe
+      - name: sdkconfig flags
+        if: always()
+        run: grep -r -h -E "CONFIG_ESP_HTTPS_SERVER_ENABLE|CONFIG_MBEDTLS_DYNAMIC_BUFFER|CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN|CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN|CONFIG_HTTPD_MAX_REQ_HDR_LEN|CONFIG_MBEDTLS_ECP_DP_SECP256R1_ENABLED|CONFIG_ESP_TLS_SERVER" ~/.arduino15/packages/esp32/tools/esp32-arduino-libs/*/esp32/sdkconfig | sort -u
