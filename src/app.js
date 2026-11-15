@@ -1034,11 +1034,17 @@ function runHTML(id) {
   return h;
 }
 
+let sessPick = false;   // Sessions > Print report: showing the list of sessions to print
 function sessionsHTML() {
   if (!runs.length) return `<h1>Sessions</h1><div class="card empty">No runs saved yet.</div>`;
   const days = {}; for (const r of runs) (days[dayKey(r.ts)] = days[dayKey(r.ts)] || []).push(r);
-  let h = `<h1>Sessions</h1>` + compareBar();
-  for (const k of Object.keys(days).sort().reverse()) {
+  const keys = Object.keys(days).sort().reverse();
+  let h = `<div class="between" style="align-items:center"><h1>Sessions</h1><button class="btn sm" data-act="sess-print" aria-expanded="${!!sessPick}">Print report</button></div>`;
+  // pick which session to print (the most recent ones)
+  if (sessPick) h += `<div class="card"><div class="between"><div class="label">Print which session?</div><button class="btn sm ghost" data-act="sess-print">Close</button></div>
+    <div class="list" style="margin-top:6px">${keys.slice(0, 10).map((k) => `<div class="item" data-act="day-report" data-id="${k}"><div><b>${dayLabel(k, true)}</b><div class="small muted">${days[k].length} run${days[k].length > 1 ? "s" : ""} · ${esc([...new Set(days[k].map((r) => athleteById(r.athleteId).name))].join(", "))}</div></div><div class="r" style="color:var(--purple);font-weight:700">Print</div></div>`).join("")}</div></div>`;
+  h += compareBar();
+  for (const k of keys) {
     const list = days[k], who = [...new Set(list.map((r) => athleteById(r.athleteId).name))];
     const tests = [...new Set(list.map(testKey))].map(testShort);
     h += `<div class="card list"><div class="item" data-act="open-session" data-id="${k}" style="padding-top:0"><div><b>${dayLabel(k, true)}</b><div class="small muted">${list.length} run${list.length > 1 ? "s" : ""} · ${esc(who.join(", "))}</div><div class="small muted">${esc(tests.join(" · "))}</div></div><div class="r">›</div></div></div>`;
@@ -1047,7 +1053,7 @@ function sessionsHTML() {
 }
 function sessionHTML(k) {
   const list = runs.filter((r) => dayKey(r.ts) === k);
-  let h = `<button class="btn sm" data-act="back">‹ Sessions</button><h1 style="margin-top:10px">${dayLabel(k, true)}</h1>` + compareBar();
+  let h = `<div class="between" style="align-items:center"><button class="btn sm" data-act="back">‹ Sessions</button>${list.length ? `<button class="btn sm" data-act="day-report" data-id="${k}">Print report</button>` : ""}</div><h1 style="margin-top:10px">${dayLabel(k, true)}</h1>` + compareBar();
   if (!list.length) return h + `<div class="card empty">No runs on this day.</div>`;
   const byA = {}; for (const r of list) (byA[r.athleteId] = byA[r.athleteId] || []).push(r);
   for (const [aid, rs] of Object.entries(byA)) {
@@ -1332,6 +1338,12 @@ document.addEventListener("click", (e) => {
     case "cap-close": cap.session = null; saveSession(); cap.phase = "setup"; go("home"); break;
     case "cmp-report": { const t = anState.test, ids = (anState.cmp || []).filter((x) => runs.some((r) => r.athleteId === x && testKey(r) === t)); if (ids.length > 1) openCompareReport(t, ids); else toast("Pick at least two athletes to compare."); break; }
     case "an-report": if (anState.athleteId && anState.test) openAthleteReport(anState.athleteId, anState.test); break;
+    case "sess-print": {
+      const ks = [...new Set(runs.map((r) => dayKey(r.ts)))];
+      if (ks.length === 1 && !sessPick) { openSessionReport(runs.filter((r) => dayKey(r.ts) === ks[0]).map((r) => r.id)); break; }
+      sessPick = !sessPick; render(); break;
+    }
+    case "day-report": sessPick = false; openSessionReport(runs.filter((r) => dayKey(r.ts) === id).map((r) => r.id)); render(); break;
     case "session-report": if (cap.session) openSessionReport(cap.session.ids); break;
     case "cap-mode": cap.mode = v; settings.lastMode = v; saveSettings(); cap.step = "distance"; cap.error = null; render(); window.scrollTo(0, 0); break;
     case "cap-target": cap.target = +v; settings.lastTarget = +v; saveSettings(); cap.step = "who"; render(); window.scrollTo(0, 0); break;
