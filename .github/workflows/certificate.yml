@@ -1,0 +1,98 @@
+name: Sensor certificate
+
+# Keeps https://sensor.paytonpittsdesigns.com working:
+#   1. points that name at the sensor's Wi-Fi address (192.168.4.1) in Cloudflare DNS
+#   2. gets a certificate from Let's Encrypt for the sensor's own key (cert/sensor.csr, sent from the app once)
+#   3. renews it a month before it runs out, and publishes it as cert/sensor.pem; the app installs it on the sensor
+# Needs the CLOUDFLARE_API_TOKEN secret (Settings > Secrets and variables > Actions): DNS Write + Zone Read on the domain.
+
+on:
+  push:
+    branches: [main]
+    paths: ["cert/sensor.csr"]
+  schedule:
+    - cron: "23 9 * * 1"      # every Monday
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: sensor-certificate
+
+env:
+  NAME: sensor.paytonpittsdesigns.com
+  ZONE: paytonpittsdesigns.com
+  SENSOR_IP: 192.168.4.1
+
+jobs:
+  certificate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the setup
+        id: check
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CF_TOKEN" ]; then echo "::error::Add the CLOUDFLARE_API_TOKEN secret (Settings > Secrets and variables > Actions)"; exit 1; fi
+          if [ -f cert/sensor.csr ]; then echo "csr=yes" >> "$GITHUB_OUTPUT"; else echo "csr=no" >> "$GITHUB_OUTPUT"; echo "::notice::No cert/sensor.csr yet. Send the sensor's setup code from the app first."; fi
+
+      - name: Point the sensor's name at the sensor (Cloudflare DNS)
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          tok, name, zone, ip = os.environ["CF_TOKEN"], os.environ["NAME"], os.environ["ZONE"], os.environ["SENSOR_IP"]
+          def api(method, path, body=None):
+              req = urllib.request.Request("https://api.cloudflare.com/client/v4" + path, method=method,
+                    data=json.dumps(body).encode() if body is not None else None,
+                    headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"})
+              with urllib.request.urlopen(req) as r: return json.load(r)
+          zones = api("GET", f"/zones?name={zone}")["result"]
+          if not zones: raise SystemExit(f"::error::The token can't see {zone}. Give it DNS Write and Zone Read on that zone.")
+          zid = zones[0]["id"]
+          recs = api("GET", f"/zones/{zid}/dns_records?type=A&name={name}")["result"]
+          rec = {"type": "A", "name": name, "content": ip, "ttl": 300, "proxied": False, "comment": "LiDAR sensor (its own Wi-Fi address)"}
+          if not recs: api("POST", f"/zones/{zid}/dns_records", rec); print("created", name, "->", ip)
+          elif recs[0]["content"] != ip or recs[0]["proxied"]: api("PUT", f"/zones/{zid}/dns_records/{recs[0]['id']}", rec); print("updated", name, "->", ip)
+          else: print(name, "already ->", ip)
+          PY
+
+      - name: Does the certificate need renewing?
+        id: need
+        if: steps.check.outputs.csr == 'yes'
+        run: |
+          need=yes
+          if [ -f cert/sensor.pem ]; then
+            same=$( [ "$(openssl req -in cert/sensor.csr -noout -pubkey | openssl pkey -pubin -outform der | sha256sum)" = "$(openssl x509 -in cert/sensor.pem -noout -pubkey | openssl pkey -pubin -outform der | sha256sum)" ] && echo y || echo n )
+            if [ "$same" = y ] && openssl x509 -in cert/sensor.pem -noout -checkend $((30*24*3600)) >/dev/null; then need=no; fi
+          fi
+          echo "Renew: $need"; echo "need=$need" >> "$GITHUB_OUTPUT"
+
+      - name: Get a certificate from Let's Encrypt
+        if: steps.need.outputs.need == 'yes'
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pip install --quiet certbot certbot-dns-cloudflare
+          mkdir -p /tmp/le && umask 077 && printf 'dns_cloudflare_api_token = %s\n' "$CF_TOKEN" > /tmp/le/cf.ini
+          certbot certonly --non-interactive --agree-tos --register-unsafely-without-email \
+            --csr cert/sensor.csr -d "$NAME" \
+            --dns-cloudflare --dns-cloudflare-credentials /tmp/le/cf.ini --dns-cloudflare-propagation-seconds 30 \
+            --config-dir /tmp/le/config --work-dir /tmp/le/work --logs-dir /tmp/le/logs \
+            --cert-path /tmp/le/cert.pem --fullchain-path /tmp/le/fullchain.pem --chain-path /tmp/le/chain.pem
+          cp /tmp/le/fullchain.pem cert/sensor.pem
+          until=$(date -u -d "$(openssl x509 -in cert/sensor.pem -noout -enddate | cut -d= -f2)" +%Y-%m-%dT%H:%M:%SZ)
+          printf '{"name":"%s","until":"%s","issued":"%s"}\n' "$NAME" "$until" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > cert/sensor.json
+          echo "Certificate valid until $until"
+
+      - name: Publish it
+        if: steps.need.outputs.need == 'yes'
+        run: |
+          git config user.name "sensor-certificate-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cert/sensor.pem cert/sensor.json
+          git commit -m "Sensor certificate renewed, valid until $(jq -r .until cert/sensor.json)"
+          git push
