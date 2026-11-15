@@ -43,8 +43,9 @@ button,input,select{font:inherit;color:inherit}
 html.ios-app .top{padding-top:calc(12px + max(env(safe-area-inset-top,0px),24px))}
 /* tablets and wider: line the header up with the content column */
 @media (min-width:720px){.top{padding-left:max(16px,calc((100% - 680px) / 2 + 16px));padding-right:max(16px,calc((100% - 680px) / 2 + 16px))}}
-.brand{font-family:var(--display);font-weight:800;font-size:clamp(17px,4.6vw,23px);letter-spacing:.6px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.brand{font-family:var(--display);font-weight:800;font-size:clamp(15px,4.2vw,23px);letter-spacing:.4px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .top .pill{flex:none}
+.brand .hmark{width:1.4em;height:1.4em;vertical-align:-.36em;margin-right:.28em}
 .brand b{background:linear-gradient(90deg,var(--pink),var(--purple),var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
 .pill{font-size:12px;font-weight:600;padding:5px 10px;border-radius:999px;background:var(--card2);color:var(--muted);white-space:nowrap}
 .pill.ok{color:var(--good)}.pill.off{color:var(--bad)}
@@ -199,7 +200,7 @@ button:focus-visible,.chip:focus-visible,.opt:focus-visible{outline:2px solid va
 .page .box{border:1px solid var(--rule);border-radius:12px;padding:14px 16px 12px;margin-bottom:12px;position:relative}
 .page .box.btop{border-top:6px solid var(--ink)}
 .page .logo{display:flex;align-items:center;gap:10px}
-.page .logo .mark{width:46px;height:30px}
+.page .logo .mark{width:40px;height:40px}
 .page .logo .name{font-family:var(--display);font-weight:600;font-size:19px;letter-spacing:.4px;line-height:1}
 .page .logo .name b{color:var(--acc)}
 .page .logo .tagline{font-size:10px;letter-spacing:.6px;color:var(--ink2)}
@@ -308,7 +309,7 @@ button:focus-visible,.chip:focus-visible,.opt:focus-visible{outline:2px solid va
 </head>
 <body>
 <header class="top">
-  <div class="brand">PAYTON'S <b>LiDAR</b> SENSOR</div>
+  <div class="brand"><svg class="hmark" viewBox="12 23 76 76" aria-hidden="true"><g stroke="#1a9cf0" stroke-width="3.2" stroke-linecap="round" fill="none"><path d="M51 80 L37 95"/><path d="M51 80 L65 95"/><path d="M51 80 L51 96"/></g><path d="M42 70 L58 70 L58 81 L42 81 Z" fill="#22b8ff"/><path d="M58 70 L64 66 L64 77 L58 81 Z" fill="#1287c9"/><path d="M66 46 L82 36 L82 66 L66 76 Z" fill="#14121b"/><path d="M18 46 L66 46 L66 76 L18 76 Z" fill="#24212c"/><path d="M18 46 L66 46 L66 76 L18 76 Z M66 46 L82 36 L82 66 L66 76" fill="none" stroke="#3d3849" stroke-width="1" stroke-linejoin="round"/><circle cx="32" cy="61" r="7.4" fill="#0a0910" stroke="#4a4458" stroke-width="1.2"/><circle cx="32" cy="61" r="4.4" fill="#1b2a4a"/><path d="M28.6 59.2 A4 4 0 0 1 33.6 57.4" stroke="#7fd3ff" stroke-width="1.3" fill="none" stroke-linecap="round"/><circle cx="51" cy="61" r="7.4" fill="#0a0910" stroke="#4a4458" stroke-width="1.2"/><circle cx="51" cy="61" r="4.4" fill="#1b2a4a"/><path d="M47.6 59.2 A4 4 0 0 1 52.6 57.4" stroke="#7fd3ff" stroke-width="1.3" fill="none" stroke-linecap="round"/><circle cx="61.5" cy="51" r="1.3" fill="#ff2d8a"/><path d="M66 38 L82 28 L82 36 L66 46 Z" fill="#5b2fc4"/><path d="M18 38 L66 38 L66 46 L18 46 Z" fill="#7444e8"/><path d="M18 38 L34 28 L82 28 L66 38 Z" fill="#9a70ff"/><path d="M30 34.2 L72 34.2 M33.5 31.8 L75.5 31.8" stroke="#c9b3ff" stroke-width=".9" stroke-linecap="round"/></svg>PAYTON'S <b>LiDAR</b> SENSOR</div>
   <span id="conn" class="pill off">No sensor</span>
 </header>
 <main id="app"></main>

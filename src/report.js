@@ -1,13 +1,12 @@
 const INK = "#1d1838", INK2 = "#5b5680", RULE = "#e3dff0", ACC = "#e0147a", ACC2 = "#7444e8", ACC3 = "#0f8fd6";
-const LOGO = `<svg class="mark" viewBox="0 0 46 30"><defs><linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="${ACC}"/><stop offset=".5" stop-color="${ACC2}"/><stop offset="1" stop-color="${ACC3}"/></linearGradient></defs>
-  <path d="M2 26 L20 4 L26 12 L44 2 L44 9 L27 19 L21 12 L8 28 Z" fill="url(#lg)"/><circle cx="40" cy="24" r="4" fill="${INK}"/></svg>`;
+const LOGO = `<svg class="mark" viewBox="12 23 76 76" aria-hidden="true"><g stroke="#1a9cf0" stroke-width="3.2" stroke-linecap="round" fill="none"><path d="M51 80 L37 95"/><path d="M51 80 L65 95"/><path d="M51 80 L51 96"/></g><path d="M42 70 L58 70 L58 81 L42 81 Z" fill="#22b8ff"/><path d="M58 70 L64 66 L64 77 L58 81 Z" fill="#1287c9"/><path d="M66 46 L82 36 L82 66 L66 76 Z" fill="#14121b"/><path d="M18 46 L66 46 L66 76 L18 76 Z" fill="#24212c"/><path d="M18 46 L66 46 L66 76 L18 76 Z M66 46 L82 36 L82 66 L66 76" fill="none" stroke="#3d3849" stroke-width="1" stroke-linejoin="round"/><circle cx="32" cy="61" r="7.4" fill="#0a0910" stroke="#4a4458" stroke-width="1.2"/><circle cx="32" cy="61" r="4.4" fill="#1b2a4a"/><path d="M28.6 59.2 A4 4 0 0 1 33.6 57.4" stroke="#7fd3ff" stroke-width="1.3" fill="none" stroke-linecap="round"/><circle cx="51" cy="61" r="7.4" fill="#0a0910" stroke="#4a4458" stroke-width="1.2"/><circle cx="51" cy="61" r="4.4" fill="#1b2a4a"/><path d="M47.6 59.2 A4 4 0 0 1 52.6 57.4" stroke="#7fd3ff" stroke-width="1.3" fill="none" stroke-linecap="round"/><circle cx="61.5" cy="51" r="1.3" fill="#ff2d8a"/><path d="M66 38 L82 28 L82 36 L66 46 Z" fill="#5b2fc4"/><path d="M18 38 L66 38 L66 46 L18 46 Z" fill="#7444e8"/><path d="M18 38 L34 28 L82 28 L66 38 Z" fill="#9a70ff"/><path d="M30 34.2 L72 34.2 M33.5 31.8 L75.5 31.8" stroke="#c9b3ff" stroke-width=".9" stroke-linecap="round"/></svg>`;
 function brandBlock(right) {
   return `<div class="between" style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid ${RULE}">
     <div class="logo">${LOGO}<div><div class="name">PAYTON'S <b>LiDAR</b> SENSOR</div><div class="tagline">LASER SPEED · TF03 LiDAR · DESIGNED BY PAYTON PITTS</div></div></div>
     <div style="text-align:right;color:${INK2};font-size:12.5px;line-height:1.6">${right}</div></div>`;
 }
 function footer(page, pages) {
-  return `<div class="foot"><div class="logo" style="gap:8px">${LOGO.replace('class="mark"', 'class="mark" style="width:30px;height:20px"')}<div><b>PAYTON'S LiDAR SENSOR</b><div style="color:${INK2}">Tampa, FL</div></div></div>
+  return `<div class="foot"><div class="logo" style="gap:8px">${LOGO.replace('class="mark"', 'class="mark" style="width:26px;height:26px"')}<div><b>PAYTON'S LiDAR SENSOR</b><div style="color:${INK2}">Tampa, FL</div></div></div>
     <div style="text-align:right"><b>Payton Pitts</b><div style="color:${INK2}">Designer · USF Track &amp; Field</div></div></div>
     <div class="fine"><span>LiDAR Sensor app · Benewake TF03 · 1000 readings per second</span><span>Page ${page} of ${pages}</span></div>`;
 }

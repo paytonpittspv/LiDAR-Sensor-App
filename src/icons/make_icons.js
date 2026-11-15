@@ -18,4 +18,5 @@ const jobs = [
     console.log(name, fs.statSync(path.join(out, name)).size, 'bytes');
   }
   await b.close();
+  require('child_process').execFileSync('python3', [path.join(__dirname, 'shrink.py'), out], { stdio: 'inherit' });
 })();

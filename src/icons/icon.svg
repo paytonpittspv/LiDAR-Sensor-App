@@ -1,14 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#231d47"/><stop offset="1" stop-color="#0b0916"/></linearGradient>
-    <radialGradient id="glow" cx=".5" cy=".52" r=".5"><stop offset="0" stop-color="#8b5cf6" stop-opacity=".42"/><stop offset=".6" stop-color="#8b5cf6" stop-opacity=".08"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/></radialGradient>
-    <linearGradient id="mk" x1="0" x2="1"><stop offset="0" stop-color="#ff2d8a"/><stop offset=".5" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22b8ff"/></linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2a2352"/><stop offset="1" stop-color="#0b0916"/></linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#8b5cf6" stop-opacity=".5"/><stop offset=".65" stop-color="#8b5cf6" stop-opacity=".1"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/></radialGradient>
   </defs>
   <rect width="1024" height="1024" fill="url(#bg)"/>
   <rect width="1024" height="1024" fill="url(#glow)"/>
-  <!-- the logo mark (46 x 30) scaled up and centred -->
-  <g transform="translate(190 302) scale(14)">
-    <path d="M2 26 L20 4 L26 12 L44 2 L44 9 L27 19 L21 12 L8 28 Z" fill="url(#mk)"/>
-    <circle cx="40" cy="24" r="4" fill="#ffffff"/>
+  <svg x="152" y="152" width="720" height="720" viewBox="12 23 76 76">
+  <!-- tripod: three blue legs under the mount -->
+  <g stroke="#1a9cf0" stroke-width="3.2" stroke-linecap="round" fill="none">
+    <path d="M51 80 L37 95"/><path d="M51 80 L65 95"/><path d="M51 80 L51 96"/>
   </g>
+  <!-- blue tripod mount block -->
+  <path d="M42 70 L58 70 L58 81 L42 81 Z" fill="#22b8ff"/>
+  <path d="M58 70 L64 66 L64 77 L58 81 Z" fill="#1287c9"/>
+  <!-- black body -->
+  <path d="M66 46 L82 36 L82 66 L66 76 Z" fill="#14121b"/>
+  <path d="M18 46 L66 46 L66 76 L18 76 Z" fill="#24212c"/>
+  <path d="M18 46 L66 46 L66 76 L18 76 Z M66 46 L82 36 L82 66 L66 76" fill="none" stroke="#3d3849" stroke-width="1" stroke-linejoin="round"/>
+  <!-- lens windows -->
+  <circle cx="32" cy="61" r="7.4" fill="#0a0910" stroke="#4a4458" stroke-width="1.2"/>
+  <circle cx="32" cy="61" r="4.4" fill="#1b2a4a"/>
+  <path d="M28.6 59.2 A4 4 0 0 1 33.6 57.4" stroke="#7fd3ff" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  <circle cx="51" cy="61" r="7.4" fill="#0a0910" stroke="#4a4458" stroke-width="1.2"/>
+  <circle cx="51" cy="61" r="4.4" fill="#1b2a4a"/>
+  <path d="M47.6 59.2 A4 4 0 0 1 52.6 57.4" stroke="#7fd3ff" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  <circle cx="61.5" cy="51" r="1.3" fill="#ff2d8a"/>
+  <!-- purple lid -->
+  <path d="M66 38 L82 28 L82 36 L66 46 Z" fill="#5b2fc4"/>
+  <path d="M18 38 L66 38 L66 46 L18 46 Z" fill="#7444e8"/>
+  <path d="M18 38 L34 28 L82 28 L66 38 Z" fill="#9a70ff"/>
+  <path d="M30 34.2 L72 34.2 M33.5 31.8 L75.5 31.8" stroke="#c9b3ff" stroke-width=".9" stroke-linecap="round"/>
+</svg>
 </svg>
