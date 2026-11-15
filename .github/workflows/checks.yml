@@ -32,7 +32,15 @@ jobs:
       - name: Rebuild and make sure index.html and page.h are up to date
         run: |
           python3 src/build.py
-          git diff --exit-code -- index.html firmware/SpeedLidar/page.h || (echo "::error::Run python3 src/build.py and commit the result" && exit 1)
+          git diff --exit-code -- index.html || (echo "::error::Run python3 src/build.py and commit the result" && exit 1)
+          git checkout -- firmware/SpeedLidar/page.h
+          # page.h holds the app gzipped (the exact bytes depend on the zlib version): check it unzips to index.html
+          python3 -c "
+          import gzip, re
+          src = open('firmware/SpeedLidar/page.h').read()
+          data = bytes(int(x) for x in re.search(r'PAGE_GZ\[\] PROGMEM = \{(.*?)\};', src, re.S).group(1).replace('\n', '').split(','))
+          assert gzip.decompress(data).decode('utf-8') == open('index.html', encoding='utf-8').read(), 'page.h is out of date: run python3 src/build.py'
+          print('page.h matches index.html')"
       - name: Accuracy tests on simulated runs
         working-directory: src
         run: node test_engine.js

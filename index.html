@@ -82,6 +82,7 @@ h3{font-size:15px;margin:14px 0 6px}
 .chip.big{font-size:20px;font-weight:700;padding:16px 0;border-radius:14px;text-align:center;justify-content:center}
 .wiz-sum{display:flex;justify-content:space-between;align-items:center;margin-top:14px}
 details.howto-d{margin-top:14px}details.howto-d summary{cursor:pointer;color:var(--purple);font-weight:600;padding:6px 0}
+ol.steps{margin:0;padding-left:20px}ol.steps li{margin:8px 0;font-size:14px;line-height:1.5}
 .zone{display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:7px 12px;border-radius:999px;border:1px solid var(--line);font-size:13px;color:var(--muted)}
 .zone i{width:10px;height:10px;border-radius:50%;background:var(--muted);opacity:.5}
 .zone.on{color:var(--text);border-color:var(--pink)}.zone.on i{background:var(--pink);opacity:1;animation:pulse 1s ease-in-out infinite}
@@ -1005,6 +1006,7 @@ async function poll() {
     const live = view === "new" && cap.phase === "recording" && cap.liveFrom != null && !cap.sim;
     const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 900);
     const j = await (await fetch(live ? `/live?from=${cap.liveFrom}` : "/live", { cache: "no-store", signal: ctl.signal })).json(); clearTimeout(to);
+    if (!sensor.connected) setTimeout(certSync, 400);
     sensor.connected = true; sensor.misses = 0;
     sensor.d = j.d > 10 && j.d < j.max ? j.d / 100 : null; sensor.s = j.s; sensor.rate = j.rate; sensor.rec = j.rec; sensor.moved = j.moved;
     sensor.state = j.state || 0; sensor.sets = j.sets || 0; sensor.go = j.go || 0; sensor.inZone = !!j.in;
@@ -1017,10 +1019,81 @@ async function poll() {
   const z = $("#zone"); if (z) { z.classList.toggle("on", sensor.inZone); z.querySelector("span").textContent = sensor.inZone ? "Someone is in the zone: stand still…" : "Nobody in the zone yet"; }
 }
 // poll faster while a run is live
-// the copy on the web (https) can't reach the sensor: browsers block a secure page from talking to it
-const WEB_COPY = location.protocol === "https:";
-// the web copy works offline once it's been opened (the sensor's own copy is always offline anyway)
-if (WEB_COPY && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+// Where this copy of the app is running:
+//   https://sensor.paytonpittsdesigns.com  the sensor's secure address: records, keeps every run, opens offline anywhere
+//   http://192.168.4.1                     the sensor's plain address: setup, and the fallback before the certificate is on
+//   GitHub Pages (https)                   the web copy: can't reach the sensor (browsers block a secure page talking to it)
+const SECURE_HOST = "sensor.paytonpittsdesigns.com", SECURE_URL = "https://" + SECURE_HOST + "/";
+const ON_SECURE = location.hostname === SECURE_HOST;
+const ON_PLAIN = location.protocol === "http:";
+const WEB_COPY = location.protocol === "https:" && !ON_SECURE;
+if (location.protocol === "https:" && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+
+// ---------------- the sensor's certificate ----------------
+// The GitHub job (cert/) gets and renews the certificate. When the phone has internet the app downloads the
+// newest one; when it's connected to the sensor it installs it there if the sensor's is older.
+const CERT_URL = "https://raw.githubusercontent.com/paytonpittspv/LiDAR-Sensor-App/main/cert/";
+const SETUP_URL = "https://github.com/paytonpittspv/LiDAR-Sensor-App/new/main?filename=cert/sensor.csr&value=";
+const certSaved = () => { try { return JSON.parse(localStorage.getItem("pls.cert") || "null"); } catch (e) { return null; } };
+let sensorTls = null, certOnline = null;
+async function certFetch() {
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 7000);
+  try {
+    const j = await (await fetch(CERT_URL + "sensor.json?t=" + Date.now(), { cache: "no-store", signal: ctl.signal })).json();
+    certOnline = j; const have = certSaved();
+    if (!have || j.until > have.until) {
+      const pem = await (await fetch(CERT_URL + "sensor.pem?t=" + Date.now(), { cache: "no-store", signal: ctl.signal })).text();
+      if (pem.includes("BEGIN CERTIFICATE")) { localStorage.setItem("pls.cert", JSON.stringify({ until: j.until, pem })); if (view === "settings") render(); }
+    }
+    return true;
+  } catch (e) { return false; } finally { clearTimeout(to); }
+}
+async function certSync() {
+  if (WEB_COPY || !sensor.connected) return;
+  try {
+    sensorTls = await (await fetch("/tls", { cache: "no-store" })).json();
+    const have = certSaved();
+    if (have && (!sensorTls.until || have.until > sensorTls.until)) {
+      const r = await (await fetch("/cert", { method: "POST", body: have.pem, headers: { "Content-Type": "text/plain" } })).json();
+      if (r.ok) {
+        sensorTls.until = have.until; sensorTls.secure = true;
+        if (ON_PLAIN) { toast("Certificate installed. Opening the secure address…"); setTimeout(() => (location.href = SECURE_URL), 3000); }
+        else toast("Sensor's certificate renewed.");
+      }
+    }
+    if (view === "settings") render();
+  } catch (e) {}
+}
+// look for a newer certificate now and then (fails fast on the sensor's Wi-Fi, which has no internet)
+setTimeout(certFetch, 1500); setInterval(() => { if (ON_PLAIN && !certSaved() && localStorage.getItem("pls.setupLink")) certFetch(); }, 20000); setInterval(certFetch, 10 * 60 * 1000); window.addEventListener("online", () => certFetch());
+async function copySetupLink() {
+  try {
+    const csr = (await (await fetch("/csr", { cache: "no-store" })).text()).trim();
+    if (!csr.includes("CERTIFICATE REQUEST")) throw new Error("no csr");
+    const url = SETUP_URL + encodeURIComponent(csr + "\n");
+    localStorage.setItem("pls.setupLink", url);
+    toast(copyText(url) ? "Setup link copied." : "Copy the link in the box below.");
+  } catch (e) { toast("Couldn't read the setup code: join the SpeedLidar Wi-Fi first."); }
+  render();
+}
+function secureCardHTML() {
+  const have = certSaved(), when = (s) => new Date(s).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  if (ON_SECURE) return `<div class="card"><div class="label">Secure address</div><div style="margin-top:4px"><b>${SECURE_HOST}</b></div>
+    <div class="small muted" style="margin-top:4px">${sensorTls && sensorTls.until ? `Certificate on the sensor good until ${when(sensorTls.until)}.` : "Connect to the sensor to check its certificate."} ${have ? `Newest one saved on this phone: until ${when(have.until)}.` : ""} It renews by itself: open the app with internet now and then and it carries the new one to the sensor.</div></div>`;
+  if (WEB_COPY) return `<div class="card"><div class="label">The app's new home</div><div class="small muted" style="margin-top:4px">Once the sensor's secure address is set up, use <b>${SECURE_HOST}</b> instead of this copy: it records and opens offline, and keeps every run in one place. Move your runs there with <b>Copy runs</b> below, then <b>Paste runs</b> in the new app.</div></div>`;
+  // on the sensor's plain address: one-time setup
+  const done = sensorTls && sensorTls.secure, link = localStorage.getItem("pls.setupLink");
+  if (done) return `<div class="card tint"><div class="label">Secure address</div><div class="small muted" style="margin:4px 0 10px">Set up: certificate good until ${when(sensorTls.until)}.</div><a class="btn primary" href="${SECURE_URL}">Open ${SECURE_HOST}</a></div>`;
+  return `<div class="card tint"><div class="label">Set up the secure address · once</div>
+    <div class="small muted" style="margin:4px 0 10px">Gives the app one home at <b>${SECURE_HOST}</b> that records, opens offline anywhere and keeps every run together. Takes about 5 minutes.</div>
+    <ol class="steps">
+      <li><b>On the SpeedLidar Wi-Fi</b>, tap <button class="btn sm" data-act="cert-copy">Copy setup link</button>${link ? ` <span class="small" style="color:var(--good)">✓ copied</span>` : ""}</li>
+      <li>Turn <b>Wi-Fi off</b> (cellular on). Paste the link into Safari's address bar, sign in to GitHub if asked and tap <b>Commit changes</b>, then <b>Commit changes</b> again.</li>
+      <li>Come back to <b>this page</b> and leave it open. In about 3 minutes it finds the certificate: ${have ? `<b style="color:var(--good)">✓ certificate ready (until ${when(have.until)})</b>` : `<span class="muted">waiting… <button class="btn sm ghost" data-act="cert-check">Check now</button></span>`}</li>
+      <li>Turn <b>Wi-Fi back on</b> and join SpeedLidar. It installs the certificate on the sensor and moves to the secure address. Add that one to your Home Screen.</li>
+    </ol>
+    ${link ? `<textarea readonly rows="2" style="width:100%;font-size:12px;margin-top:6px" onclick="this.select()">${esc(link)}</textarea>` : ""}</div>`;
+}
 function pollLoop() {
   if (WEB_COPY) { const p = $("#conn"); p.className = "pill off"; p.textContent = "Offline app"; return; } poll().finally(() => setTimeout(pollLoop, view === "new" && ["waiting", "ready", "recording"].includes(cap.phase) ? 120 : 250)); }
 
@@ -1731,7 +1804,7 @@ function homeHTML() {
   let h = `<div class="hello"><div class="hi">${hi}</div><div class="muted">${line}</div></div>`;
   h += `<div class="card tint"><div class="between"><div><div class="label">Sensor</div>
       <div class="small" style="margin-top:2px"><span class="dot" style="background:${sensor.connected ? "var(--good)" : "var(--muted)"}"></span>${sensor.connected ? `Connected · <span data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</span> m` : "Not connected"}</div></div>
-      <div class="small muted" style="text-align:right;max-width:55%">${sensor.connected ? `${sensor.rate} readings/s` : (WEB_COPY ? "This app opens anywhere and keeps all your runs. To record, join the SpeedLidar Wi-Fi and open 192.168.4.1 in Safari. New run here is a simulated practice run." : "Join the SpeedLidar Wi-Fi to record.")}</div></div>
+      <div class="small muted" style="text-align:right;max-width:55%">${sensor.connected ? `${sensor.rate} readings/s` : (WEB_COPY ? `This copy can't reach the sensor. To record, join the SpeedLidar Wi-Fi and open ${SECURE_HOST} (or 192.168.4.1). New run here is a simulated practice run.` : "Join the SpeedLidar Wi-Fi to record.")}</div></div>
     <button class="btn big primary" style="margin-top:12px" data-go="new">New run</button></div>`;
   h += sendCardHTML(true) + (WEB_COPY ? getCardHTML() : "");
   if (!athletes.length) return h + `<div class="card"><b>Start here</b><div class="small muted" style="margin:4px 0 10px">Add the athletes you'll be timing. Body weight is optional and only used for power.</div><button class="btn" data-act="ath-new">Add an athlete</button></div>`;
@@ -2132,7 +2205,7 @@ function settingsHTML() {
   h += `<h2>Vault setup</h2>${setupGuide("runway100")}${setupGuide("runway150")}`;
   h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">${WEB_COPY ? "This copy of the app opens with no connection at all." : "This is the sensor's page. Send runs to your home-screen app after each session."} ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
     <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
-    ${WEB_COPY ? getCardHTML() : sendCardHTML(false)}
+    ${secureCardHTML()}${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}
     <div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps. Simulated runs are marked and never sent.</div><div class="row"><button class="btn" data-act="demo-data">Add demo data</button>${runs.some((r) => r.sim) ? `<button class="btn" data-act="del-sim">Delete simulated runs</button>` : ""}<button class="btn danger" data-act="clear-all">Delete all runs</button></div></div>`;
   h += `<p class="small muted" style="text-align:center;margin-top:20px">PAYTON'S LiDAR SENSOR · designed by Payton Pitts</p>`;
   return h;
@@ -2188,6 +2261,8 @@ document.addEventListener("click", (e) => {
       sessPick = !sessPick; render(); break;
     }
     case "day-report": sessPick = false; openSessionReport(runs.filter((r) => dayKey(r.ts) === id).map((r) => r.id)); render(); break;
+    case "cert-copy": copySetupLink(); break;
+    case "cert-check": certFetch().then((ok) => { if (!ok) toast("No internet right now: turn Wi-Fi off (cellular on) and try again."); else if (!certSaved()) toast("Not ready yet. It takes about 3 minutes after you commit."); render(); }); break;
     case "session-report": if (cap.session) openSessionReport(cap.session.ids); break;
     case "cap-mode": cap.mode = v; settings.lastMode = v; saveSettings(); cap.step = "distance"; cap.error = null; render(); window.scrollTo(0, 0); break;
     case "cap-target": cap.target = +v; settings.lastTarget = +v; saveSettings(); cap.step = "who"; render(); window.scrollTo(0, 0); break;
@@ -2277,7 +2352,7 @@ function saveRunsFile(list) {
 }
 // the card on the sensor page
 function sendCardHTML(compact) {
-  if (WEB_COPY) return "";
+  if (WEB_COPY && compact) return "";
   const n = unsentRuns().length;
   if (!n && compact) return "";
   return `<div class="card ${n ? "tint" : ""}"><div class="label">Send to your home-screen app</div>
@@ -2287,9 +2362,9 @@ function sendCardHTML(compact) {
 // the card in the home-screen app
 let pasteBox = false;
 function getCardHTML() {
-  if (!WEB_COPY) return "";
-  return `<div class="card"><div class="label">Get runs from the sensor</div>
-    <div class="small muted" style="margin:4px 0 10px">Record on the sensor page (SpeedLidar Wi-Fi, 192.168.4.1 in Safari), tap <b>Copy runs</b> there, then come back here.</div>
+  if (!WEB_COPY && !ON_SECURE) return "";
+  return `<div class="card"><div class="label">${ON_SECURE ? "Bring in runs from another copy" : "Get runs from the sensor"}</div>
+    <div class="small muted" style="margin:4px 0 10px">${ON_SECURE ? "In the old home-screen app or on 192.168.4.1, open Settings and tap <b>Copy all again</b>, then come back here and tap <b>Paste runs</b>. Runs already here aren't added twice." : "Record on the sensor page (SpeedLidar Wi-Fi, 192.168.4.1 in Safari), tap <b>Copy runs</b> there, then come back here."}</div>
     <div class="row"><button class="btn primary" data-act="paste-runs">Paste runs</button><label class="btn" style="cursor:pointer">Open file<input type="file" id="syncFile" accept="application/json,.json" class="hidden"></label></div>
     ${pasteBox ? `<div class="field" style="margin-top:10px"><label for="pasteArea">Press and hold in the box, tap Paste, then Add runs</label><textarea id="pasteArea" rows="3" style="width:100%;font-size:16px"></textarea></div><button class="btn primary" data-act="paste-add">Add runs</button>` : ""}</div>`;
 }

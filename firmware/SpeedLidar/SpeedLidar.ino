@@ -63,6 +63,9 @@ static const uint32_t AWAY_MS       = 1500;          // armed but nobody at the 
 // serves the app over https with a real certificate, so phones keep the app for offline use.
 static const char*    HOST          = "sensor.paytonpittsdesigns.com";
 
+// a file the sensor serves (the app page is stored gzipped)
+struct Asset { const char* type; const uint8_t* data; size_t len; const char* cache; bool gz; };
+
 // states the phone sees
 enum { ST_IDLE = 0, ST_WAIT = 1, ST_SET = 2, ST_RUN = 3, ST_DONE = 4 };
 
@@ -374,7 +377,6 @@ size_t buildTls(char* json, size_t cap) {
 }
 
 // ---- https handlers ----
-struct Asset { const char* type; const uint8_t* data; size_t len; const char* cache; bool gz; };
 static const Asset A_PAGE  = {"text/html; charset=utf-8", PAGE_GZ, PAGE_GZ_LEN, "no-cache", true};
 static const Asset A_SW    = {"application/javascript", ASSET_SW, ASSET_SW_LEN, "no-cache", false};
 static const Asset A_MAN   = {"application/manifest+json", ASSET_MANIFEST, ASSET_MANIFEST_LEN, "max-age=86400", false};
