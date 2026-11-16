@@ -453,8 +453,11 @@ void startHttps() {
   httpd_ssl_config_t c = HTTPD_SSL_CONFIG_DEFAULT();
   c.servercert = (const uint8_t*)crtPem.c_str(); c.servercert_len = crtPem.length() + 1;
   c.prvtkey_pem = (const uint8_t*)keyPem.c_str(); c.prvtkey_len = keyPem.length() + 1;
-  c.httpd.max_open_sockets = 2;        // each secure connection needs ~40 KB of memory
-  c.httpd.lru_purge_enable = true;     // a new connection closes the oldest idle one instead of failing
+  // One secure connection at a time: an open connection holds ~35 KB and setting up a new one needs ~50 KB
+  // more, so two at once don't fit on a plain ESP32. Handshakes run one after another on the server task,
+  // and a new connection first closes the idle one (the browser just reconnects).
+  c.httpd.max_open_sockets = 1;
+  c.httpd.lru_purge_enable = true;
   c.httpd.max_uri_handlers = 16;
   c.httpd.stack_size = 10240;
   if (httpd_ssl_start(&https, &c) != ESP_OK) { https = nullptr; Serial.println("https didn't start"); return; }
