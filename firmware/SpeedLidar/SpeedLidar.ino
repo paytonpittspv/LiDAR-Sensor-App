@@ -69,7 +69,12 @@ struct Asset { const char* type; const uint8_t* data; size_t len; const char* ca
 // states the phone sees
 enum { ST_IDLE = 0, ST_WAIT = 1, ST_SET = 2, ST_RUN = 3, ST_DONE = 4 };
 
-uint32_t* tBuf = nullptr;   // ESP32 time of each reading (microseconds)
+// Time of each reading, stored as the gap since the previous reading in 4 µs steps (2 bytes instead of 4).
+// That frees 30 KB, which the secure (https) connections need. tStartUs is the ESP32 time of reading 0;
+// tLastUs is the time of the newest reading as rebuilt from the gaps, so rounding never adds up.
+static const uint32_t T_STEP_US = 4;
+uint16_t* tBuf = nullptr;
+volatile uint32_t tStartUs = 0, tLastUs = 0;
 uint16_t* dBuf = nullptr;   // distance (cm)
 // (signal strength isn't stored: the app doesn't use it, and the memory goes to the https connections)
 
@@ -128,7 +133,12 @@ void storeSample(uint32_t now, uint16_t d, uint16_t s) {
   }
   if (nSamples >= MAX_SAMPLES) { recording = false; state = ST_DONE; return; }
 
-  tBuf[nSamples] = now;
+  if (nSamples == 0) { tStartUs = tLastUs = now; tBuf[0] = 0; }
+  else {
+    uint32_t gap = (now - tLastUs + T_STEP_US / 2) / T_STEP_US;
+    if (gap > 0xFFFF) gap = 0xFFFF;               // only after a 0.26 s dropout
+    tBuf[nSamples] = (uint16_t)gap; tLastUs += gap * T_STEP_US;
+  }
   dBuf[nSamples] = d;
   nSamples++;
 
@@ -164,7 +174,11 @@ void storeSample(uint32_t now, uint16_t d, uint16_t s) {
     if (away >= AWAY_MS) { recording = false; resetWait = true; state = ST_WAIT; return; }
     // only keep the most recent PRE_ROLL samples
     if (nSamples >= PRE_ROLL + 1000) {
-      memmove(tBuf, tBuf + 1000, PRE_ROLL * sizeof(uint32_t));
+      uint32_t shift = 0;
+      for (uint32_t i = 1; i <= 1000; i++) shift += tBuf[i];
+      tStartUs += shift * T_STEP_US;
+      memmove(tBuf, tBuf + 1000, PRE_ROLL * sizeof(uint16_t));
+      tBuf[0] = 0;
       memmove(dBuf, dBuf + 1000, PRE_ROLL * sizeof(uint16_t));
       nSamples = PRE_ROLL;
     }
@@ -266,10 +280,12 @@ size_t buildLive(char* json, size_t cap, long from) {
            (unsigned long)nSamples, (unsigned long)badFrames, (unsigned)limitCm, (unsigned)state, (unsigned long)sets, (unsigned long)goIdx,
            (validCm(d) && (gateCm == 0 || d < gateCm)) ? "true" : "false", certUntil[0] ? "true" : "false");
   if (from >= 0 && (state == ST_RUN || state == ST_DONE) && nSamples) {
-    uint32_t n = nSamples, i = (uint32_t)from, k = 0;
-    len += snprintf(json + len, cap - len, ",\"t0\":%lu,\"pts\":[", (unsigned long)tBuf[0]);
-    for (; i < n && k < 150 && len < (int)cap - 40; i += 20, k++)
-      len += snprintf(json + len, cap - len, "%s[%lu,%u]", k ? "," : "", (unsigned long)((tBuf[i] - tBuf[0]) / 1000), dBuf[i]);
+    uint32_t n = nSamples, i = (uint32_t)from, k = 0, j = 1, steps = 0;   // steps: time of reading i, in 4 µs
+    len += snprintf(json + len, cap - len, ",\"t0\":%lu,\"pts\":[", (unsigned long)tStartUs);
+    for (; i < n && k < 150 && len < (int)cap - 40; i += 20, k++) {
+      for (; j <= i; j++) steps += tBuf[j];
+      len += snprintf(json + len, cap - len, "%s[%lu,%u]", k ? "," : "", (unsigned long)(steps * T_STEP_US / 1000), dBuf[i]);
+    }
     len += snprintf(json + len, cap - len, "],\"next\":%lu", (unsigned long)i);
   }
   len += snprintf(json + len, cap - len, "}");
@@ -300,11 +316,12 @@ template <typename Send> void streamData(Send send) {
   uint32_t n = nSamples, hdr[2] = {n, (uint32_t)limitCm};
   send((const char*)hdr, sizeof(hdr));
   static uint8_t chunk[4096];
-  uint32_t i = 0;
+  uint32_t i = 0, t = tStartUs;
   while (i < n) {
     size_t len = 0;
     while (i < n && len + 8 <= sizeof(chunk)) {
-      memcpy(chunk + len, &tBuf[i], 4); memcpy(chunk + len + 4, &dBuf[i], 2); chunk[len + 6] = chunk[len + 7] = 0;
+      if (i) t += tBuf[i] * T_STEP_US;
+      memcpy(chunk + len, &t, 4); memcpy(chunk + len + 4, &dBuf[i], 2); chunk[len + 6] = chunk[len + 7] = 0;
       len += 8; i++;
     }
     send((const char*)chunk, len);
@@ -436,7 +453,7 @@ void startHttps() {
   httpd_ssl_config_t c = HTTPD_SSL_CONFIG_DEFAULT();
   c.servercert = (const uint8_t*)crtPem.c_str(); c.servercert_len = crtPem.length() + 1;
   c.prvtkey_pem = (const uint8_t*)keyPem.c_str(); c.prvtkey_len = keyPem.length() + 1;
-  c.httpd.max_open_sockets = 3;        // each secure connection needs ~40 KB of memory
+  c.httpd.max_open_sockets = 2;        // each secure connection needs ~40 KB of memory
   c.httpd.lru_purge_enable = true;     // a new connection closes the oldest idle one instead of failing
   c.httpd.max_uri_handlers = 16;
   c.httpd.stack_size = 10240;
@@ -485,7 +502,7 @@ void setup() {
   Serial.begin(115200);
 
   // Grab the big buffers before Wi-Fi takes its share of memory.
-  tBuf = (uint32_t*)malloc(MAX_SAMPLES * sizeof(uint32_t));
+  tBuf = (uint16_t*)malloc(MAX_SAMPLES * sizeof(uint16_t));
   dBuf = (uint16_t*)malloc(MAX_SAMPLES * sizeof(uint16_t));
   if (!tBuf || !dBuf) {
     Serial.println("Not enough memory — lower MAX_SAMPLES");
