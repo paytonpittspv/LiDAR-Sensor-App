@@ -225,7 +225,9 @@ async function copySetupLink() {
   try {
     const csr = (await (await fetch("/csr", { cache: "no-store" })).text()).trim();
     if (!csr.includes("CERTIFICATE REQUEST")) throw new Error("no csr");
-    const url = SETUP_URL + encodeURIComponent(csr + "\n");
+    // one line of base64, no header lines: GitHub's new-file link keeps only the first line of a multi-line value
+    const b64 = csr.replace(/-----[A-Z ]+-----/g, "").replace(/[^A-Za-z0-9+/=]/g, "");
+    const url = SETUP_URL + encodeURIComponent(b64);
     localStorage.setItem("pls.setupLink", url);
     toast(copyText(url) ? "Setup link copied." : "Copy the link in the box below.");
   } catch (e) { toast("Couldn't read the setup code: join the SpeedLidar Wi-Fi first."); }
