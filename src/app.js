@@ -212,7 +212,7 @@ async function certSync() {
       const r = await (await fetch("/cert", { method: "POST", body: have.pem, headers: { "Content-Type": "text/plain" } })).json();
       if (r.ok) {
         sensorTls.until = have.until; sensorTls.secure = true;
-        if (ON_PLAIN) { toast("Certificate installed. Opening the secure address…"); setTimeout(() => (location.href = SECURE_URL), 3000); }
+        if (ON_PLAIN) { toast("Certificate installed on the sensor."); view = "settings"; render(); }
         else toast("Sensor's certificate renewed.");
       }
     }
@@ -240,7 +240,7 @@ function secureCardHTML() {
   if (WEB_COPY) return `<div class="card"><div class="label">The app's new home</div><div class="small muted" style="margin-top:4px">Once the sensor's secure address is set up, use <b>${SECURE_HOST}</b> instead of this copy: it records and opens offline, and keeps every run in one place. Move your runs there with <b>Copy runs</b> below, then <b>Paste runs</b> in the new app.</div></div>`;
   // on the sensor's plain address: one-time setup
   const done = sensorTls && sensorTls.secure, link = localStorage.getItem("pls.setupLink");
-  if (done) return `<div class="card tint"><div class="label">Secure address</div><div class="small muted" style="margin:4px 0 10px">Set up: certificate good until ${when(sensorTls.until)}.</div><a class="btn primary" href="${SECURE_URL}">Open ${SECURE_HOST}</a></div>`;
+  if (done) return `<div class="card tint"><div class="label">Secure address</div><div class="small muted" style="margin:4px 0 10px">✓ Set up: certificate good until ${when(sensorTls.until)}. The secure address is a new copy of the app, so bring your runs: tap <b>Copy all</b> below first, then open it, add it to your Home Screen and tap <b>Paste runs</b> in its Settings.</div><a class="btn primary" href="${SECURE_URL}">Open ${SECURE_HOST}</a></div>`;
   return `<div class="card tint"><div class="label">Set up the secure address · once</div>
     <div class="small muted" style="margin:4px 0 10px">Gives the app one home at <b>${SECURE_HOST}</b> that records, opens offline anywhere and keeps every run together. Takes about 5 minutes.</div>
     <ol class="steps">
