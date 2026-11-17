@@ -550,7 +550,7 @@ function drawDisplay() {
     body = `<div class="d-aim ${col}"><div class="d-bars">${bars}</div><div class="d-target ${on >= n ? "on" : ""}"></div><div class="d-bars">${rbars}</div></div>
       <div class="d-sub">${on >= n ? "Locked on: leave the tripod there" : "Turn the tripod slowly \u00b7 aim at athlete\u2019s back"}</div>`;
   } else if (j.s === "armed") {
-    st = "";   // no strip: the pink frame says armed, the words get the whole screen
+    st = strip("d-pink", "ARMED", E(j.who));
     body = `<div class="d-fit d-pulse">${innerHeight > innerWidth ? `<div>GO</div><div>WHEN</div>` : `<div>GO WHEN</div>`}<div class="d-pinkt">READY</div></div>`;
   } else if (j.s === "rec") {
     const prog = j.runTarget > 0 ? Math.min(1, j.runDist / j.runTarget) : 0;
