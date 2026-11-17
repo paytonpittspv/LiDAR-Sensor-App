@@ -104,6 +104,31 @@ struct Asset { const char* type; const uint8_t* data; size_t len; const char* ca
 // states the phones see
 enum { ST_IDLE = 0, ST_WAIT = 1, ST_SET = 2, ST_RUN = 3, ST_DONE = 4 };
 
+static String urlDecode(const char* s) {
+  String o; o.reserve(strlen(s));
+  while (*s) {
+    if (*s == '+') { o += ' '; s++; }
+    else if (*s == '%' && isxdigit((uint8_t)s[1]) && isxdigit((uint8_t)s[2])) { char h[3] = {s[1], s[2], 0}; o += (char)strtol(h, nullptr, 16); s += 3; }
+    else o += *s++;
+  }
+  return o;
+}
+// request parameters, from either server (query string and/or a form-encoded POST body)
+struct Params {
+  WebServer* ws = nullptr; String raw;
+  bool has(const char* k) const {
+    if (ws) return ws->hasArg(k);
+    char v[4]; esp_err_t e = httpd_query_key_value(raw.c_str(), k, v, sizeof v); return e == ESP_OK || e == ESP_ERR_HTTPD_RESULT_TRUNC;
+  }
+  String get(const char* k, const char* dflt = "") const {
+    if (ws) return ws->hasArg(k) ? ws->arg(k) : String(dflt);
+    static char v[768];
+    if (httpd_query_key_value(raw.c_str(), k, v, sizeof v) != ESP_OK) return String(dflt);
+    return urlDecode(v);
+  }
+  long num(const char* k, long dflt) const { String s = get(k); return s.length() ? s.toInt() : dflt; }
+};
+
 // One reading: its time on the S3 (µs), distance (cm) and signal strength. 8 bytes, kept in PSRAM.
 struct Sample { uint32_t t; uint16_t d; uint16_t s; };
 Sample* sBuf = nullptr;
@@ -435,30 +460,6 @@ volatile uint32_t restartHttpsAt = 0, rebootAt = 0;
 mbedtls_entropy_context entropy;
 mbedtls_ctr_drbg_context drbg;
 
-static String urlDecode(const char* s) {
-  String o; o.reserve(strlen(s));
-  while (*s) {
-    if (*s == '+') { o += ' '; s++; }
-    else if (*s == '%' && isxdigit((uint8_t)s[1]) && isxdigit((uint8_t)s[2])) { char h[3] = {s[1], s[2], 0}; o += (char)strtol(h, nullptr, 16); s += 3; }
-    else o += *s++;
-  }
-  return o;
-}
-// request parameters, from either server (query string and/or a form-encoded POST body)
-struct Params {
-  WebServer* ws = nullptr; String raw;
-  bool has(const char* k) const {
-    if (ws) return ws->hasArg(k);
-    char v[4]; esp_err_t e = httpd_query_key_value(raw.c_str(), k, v, sizeof v); return e == ESP_OK || e == ESP_ERR_HTTPD_RESULT_TRUNC;
-  }
-  String get(const char* k, const char* dflt = "") const {
-    if (ws) return ws->hasArg(k) ? ws->arg(k) : String(dflt);
-    static char v[768];
-    if (httpd_query_key_value(raw.c_str(), k, v, sizeof v) != ESP_OK) return String(dflt);
-    return urlDecode(v);
-  }
-  long num(const char* k, long dflt) const { String s = get(k); return s.length() ? s.toInt() : dflt; }
-};
 static void jsonEscape(String& out, const String& s) {
   for (size_t i = 0; i < s.length(); i++) {
     char c = s[i];
