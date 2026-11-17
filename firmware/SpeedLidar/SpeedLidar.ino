@@ -104,18 +104,19 @@ struct Asset { const char* type; const uint8_t* data; size_t len; const char* ca
 // states the phones see
 enum { ST_IDLE = 0, ST_WAIT = 1, ST_SET = 2, ST_RUN = 3, ST_DONE = 4 };
 
-static String urlDecode(const char* s) {
-  String o; o.reserve(strlen(s));
-  while (*s) {
-    if (*s == '+') { o += ' '; s++; }
-    else if (*s == '%' && isxdigit((uint8_t)s[1]) && isxdigit((uint8_t)s[2])) { char h[3] = {s[1], s[2], 0}; o += (char)strtol(h, nullptr, 16); s += 3; }
-    else o += *s++;
-  }
-  return o;
-}
-// request parameters, from either server (query string and/or a form-encoded POST body)
+// request parameters, from either server (query string and/or a form-encoded POST body).
+// (Declared before any function: the Arduino IDE adds its function prototypes above the first one.)
 struct Params {
   WebServer* ws = nullptr; String raw;
+  static String urlDecode(const char* s) {
+    String o; o.reserve(strlen(s));
+    while (*s) {
+      if (*s == '+') { o += ' '; s++; }
+      else if (*s == '%' && isxdigit((uint8_t)s[1]) && isxdigit((uint8_t)s[2])) { char h[3] = {s[1], s[2], 0}; o += (char)strtol(h, nullptr, 16); s += 3; }
+      else o += *s++;
+    }
+    return o;
+  }
   bool has(const char* k) const {
     if (ws) return ws->hasArg(k);
     char v[4]; esp_err_t e = httpd_query_key_value(raw.c_str(), k, v, sizeof v); return e == ESP_OK || e == ESP_ERR_HTTPD_RESULT_TRUNC;
