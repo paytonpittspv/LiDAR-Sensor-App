@@ -956,6 +956,9 @@ let settings = Object.assign({ midOut: 4, voice: false, chime: "original", solo:
 const saveAthletes = () => DB.set("athletes", athletes);
 const saveRuns = () => DB.set("runs", runs);
 const saveSettings = () => DB.set("settings", settings);
+// this phone/iPad, so the sensor can tell which device set up a run (the others follow along)
+if (!settings.deviceId) { settings.deviceId = uid(); saveSettings(); }
+const DEVICE_ID = settings.deviceId;
 if (settings.theme) document.documentElement.setAttribute("data-theme", settings.theme);
 if (settings.lastSetup === "polerun") settings.lastSetup = "polerun100";
 const athleteById = (id) => athletes.find((a) => a.id === id) || { id, name: "Unknown athlete" };
@@ -1012,7 +1015,7 @@ function changeTag(R) {
 
 // ---------------- sensor ----------------
 // sensor states (from the firmware): 0 idle · 1 waiting for an athlete to stand still · 2 armed · 3 running · 4 done
-const sensor = { connected: false, d: null, s: 0, rate: 0, rec: false, moved: false, misses: 0, state: 0, sets: 0, go: 0, inZone: false };
+const sensor = { connected: false, d: null, s: 0, rate: 0, rec: false, moved: false, misses: 0, state: 0, sets: 0, go: 0, inZone: false, arm: null, cfg: "", phones: 0, fw: "" };
 let pollBusy = false;
 async function poll() {
   if (pollBusy) return; pollBusy = true;
@@ -1024,11 +1027,12 @@ async function poll() {
     sensor.connected = true; sensor.misses = 0;
     sensor.d = j.d > 10 && j.d < j.max ? j.d / 100 : null; sensor.s = j.s; sensor.rate = j.rate; sensor.rec = j.rec; sensor.moved = j.moved;
     sensor.state = j.state || 0; sensor.sets = j.sets || 0; sensor.go = j.go || 0; sensor.inZone = !!j.in;
+    sensor.arm = j.arm != null ? j.arm : null; sensor.cfg = j.cfg || ""; sensor.phones = j.phones || 0; sensor.fw = j.fw || "";
     if (live && j.pts) { liveAdd(j.pts); cap.liveFrom = j.next; }
     onLive();
   } catch (e) { if (++sensor.misses > 3) { sensor.connected = false; sensor.d = null; } }
   pollBusy = false;
-  const p = $("#conn"); p.className = "pill " + (sensor.connected ? "ok" : "off"); p.textContent = sensor.connected ? (sensor.d != null ? `${sensor.d.toFixed(2)} m` : "Connected") : "No sensor";
+  const p = $("#conn"); p.className = "pill " + (sensor.connected ? "ok" : "off"); p.textContent = sensor.connected ? (sensor.d != null ? `${sensor.d.toFixed(2)} m` : "Connected") + (sensor.phones > 1 ? ` · ${sensor.phones} devices` : "") : "No sensor";
   document.querySelectorAll("[data-live]").forEach((el) => (el.textContent = sensor.d != null ? sensor.d.toFixed(2) : "—"));
   const z = $("#zone"); if (z) { z.classList.toggle("on", sensor.inZone); z.querySelector("span").textContent = sensor.inZone ? "Someone is in the zone: stand still…" : "Nobody in the zone yet"; }
 }
@@ -1187,7 +1191,10 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 // phase: setup → waiting (athlete steps in) → ready (armed, chime) → recording (live) → processing → review / waiting again
 const cap = { phase: "setup", mode: settings.lastMode, athleteId: settings.lastAthlete, target: settings.lastTarget, setup: settings.lastSetup, run: null, lastRun: null, armedAt: 0, error: null,
   queue: (settings.lastQueue || (settings.lastAthlete ? [settings.lastAthlete] : [])).filter((id) => athletes.some((x) => x.id === id)),
-  session: DB.get("session", null), setsSeen: 0, liveFrom: null, live: null, sim: null };
+  session: DB.get("session", null), setsSeen: 0, liveFrom: null, live: null, sim: null,
+  // several devices: the one that armed is the leader (re-arms, puts the result on the sensor's screen);
+  // the others follow the sensor and save the same runs
+  leader: true, armId: null, armSeen: null };
 const saveSession = () => DB.set("session", cap.session);
 const firstName = (id) => athleteById(id).name.split(" ")[0];
 function nextUp(id) { const q = cap.queue; if (q.length < 2) return id; const i = q.indexOf(id); return q[(i + 1) % q.length]; }
@@ -1208,9 +1215,14 @@ function armRule() {
 async function arm(now) {
   cap.error = null; cap.run = null; cap.live = null; cap.liveFrom = null; cap.sim = null;
   const r = armRule();
-  cap.setsSeen = sensor.sets;
+  cap.setsSeen = sensor.sets; cap.leader = true;
   if (sensor.connected) {
-    try { await fetch(`/arm?stop=${r.stop}&gate=${r.gate}&hold=${r.hold}&max=${r.max}${now ? "&now=1" : ""}`, { cache: "no-store" }); }
+    const a = athleteById(cap.athleteId), sprint = cap.mode === "sprint", S = SETUPS[cap.setup] || {};
+    const cfg = { dev: DEVICE_ID, mode: cap.mode, setup: cap.setup, target: cap.target, name: a.name, kg: a.kg || null };
+    const body = new URLSearchParams({ stop: r.stop, gate: r.gate, hold: r.hold, max: r.max, cfg: JSON.stringify(cfg), who: a.name.slice(0, 23),
+      evs: sprint ? "SPRINT" : S.pole ? "POLE RUN" : "VAULT", evl: sprint ? `Stop at ${cap.target} m` : `${S.boxFt >= 150 ? "Long" : "Short"} \u00b7 ${S.boxFt} ft`, tgt: sprint ? cap.target : 0 });
+    if (now) body.set("now", "1");
+    try { const j = await (await fetch("/arm", { method: "POST", body, cache: "no-store" })).json(); if (j && j.arm != null) { cap.armId = j.arm; cap.armSeen = j.arm; } }
     catch (e) { cap.error = "Couldn't reach the sensor. Join its Wi-Fi (SpeedLidar) and try again."; }
   }
   cap.phase = "waiting"; cap.armedAt = Date.now();
@@ -1219,8 +1231,30 @@ async function arm(now) {
 function toReady() { cap.phase = "ready"; cap.setsSeen = sensor.sets; readySignal(); render(); }
 async function stopNow() { try { await fetch("/stop", { cache: "no-store" }); } catch (e) {} }
 let fetching = false;
+// another phone/iPad set up a run on the sensor: copy its setup and record the same run
+function followCheck() {
+  if (sensor.arm == null || sensor.arm === cap.armSeen) return;
+  let c = null; try { c = JSON.parse(sensor.cfg || "null"); } catch (e) {}
+  if (!c || c.dev === DEVICE_ID) { cap.armSeen = sensor.arm; return; }
+  // busy with a run of our own: catch up once it's done
+  if (["recording", "processing", "review"].includes(cap.phase) || fetching) return;
+  cap.armSeen = sensor.arm;
+  if (sensor.state === 0) return;   // already stopped again
+  let a = athletes.find((x) => x.name.trim().toLowerCase() === String(c.name || "").trim().toLowerCase());
+  if (!a && c.name) { a = { id: uid(), name: c.name, kg: c.kg || null }; athletes.push(a); saveAthletes(); }
+  cap.mode = c.mode === "sprint" ? "sprint" : "vault";
+  if (cap.mode === "sprint") cap.target = c.target || cap.target; else if (SETUPS[c.setup]) cap.setup = c.setup;
+  if (a) cap.athleteId = a.id;
+  cap.leader = false; cap.armId = sensor.arm;
+  cap.error = null; cap.run = null; cap.live = null; cap.liveFrom = null;
+  cap.setsSeen = sensor.state >= 2 ? sensor.sets - 1 : sensor.sets;
+  cap.phase = "waiting"; cap.armedAt = Date.now();
+  toast(`Following the other device: ${a ? a.name : "next run"}`);
+  render();
+}
 function onLive() {
   if (view !== "new" || cap.sim) return;
+  followCheck();
   if (cap.phase === "waiting" && sensor.sets > cap.setsSeen && sensor.state >= 2) toReady();
   else if (cap.phase === "ready" && sensor.state === 1) { cap.phase = "waiting"; toast("They stepped away. Waiting for someone to stand in again."); render(); }
   if (cap.phase === "ready" && sensor.state === 3) startLive(Math.max(0, sensor.go - 1500));
@@ -1296,6 +1330,19 @@ function ctxFor(c) {
 }
 function finishCapture(raw) {
   const res = Engine.process(raw, ctxFor(cap));
+  const live = !cap.simRun;
+  if (!cap.leader && live) {
+    // following another device: keep the run (or skip a bad one) and wait for its next setup
+    if (res.error) toast(res.error);
+    else {
+      const run = { id: uid(), ts: Date.now(), athleteId: cap.athleteId, mode: cap.mode, res };
+      if (cap.mode === "sprint") run.target = cap.target; else run.setup = cap.setup;
+      keepRun(run); cap.athleteId = run.athleteId;
+      cap.lastRun = run; cap.lastSaved = true;
+      if (settings.voice) say(speech(run));
+    }
+    cap.phase = "waiting"; cap.setsSeen = sensor.sets; render(); return;
+  }
   if (res.error) {
     // a false start or a bad run: the same athlete goes again
     toast(res.error + " Same athlete, go again.");
@@ -1305,12 +1352,60 @@ function finishCapture(raw) {
   const run = { id: uid(), ts: Date.now(), athleteId: cap.athleteId, mode: cap.mode, res };
   if (cap.simRun) { run.sim = true; cap.simRun = false; }
   if (cap.mode === "sprint") run.target = cap.target; else run.setup = cap.setup;
+  if (live && cap.armId != null) showOnSensor(run, cap.armId);
   if (settings.solo) {
     keepRun(run);
     say((cap.queue.length > 1 ? `${firstName(run.athleteId)}. ` : "") + speech(run) + (cap.queue.length > 1 ? ` Next up, ${firstName(cap.athleteId)}.` : ""));
     // results stay on screen until the next athlete steps in and the sensor arms
     cap.lastRun = run; cap.lastSaved = true; arm();
   } else { cap.run = run; cap.phase = "review"; say(speech(run)); render(); }
+}
+// the result on the sensor's own screen (the numbers that matter, formatted for it)
+function showOnSensor(run, armId) {
+  const R = run.res, f2s = (v) => (v != null && isFinite(v) ? v.toFixed(2) : "\u2013"), ft = (v) => (v != null && isFinite(v) ? ftLabel(v) : "\u2013");
+  const n = (cap.session ? cap.session.ids.filter((id) => { const x = runs.find((r) => r.id === id); return x && x.athleteId === run.athleteId; }).length : 0) + 1;
+  const p = { run: armId, hu: "m/s", fl: `${firstName(run.athleteId)} \u00b7 run ${n}`, fr: sensor.phones > 1 ? `on ${sensor.phones} devices` : settings.solo ? "saved to phone" : "on the phone" };
+  const cells = [];
+  if (run.mode === "sprint") {
+    p.strip = `${settings.solo ? "RUN SAVED" : "RUN DONE"} \u00b7 SPRINT`; p.h = "TOP SPEED"; p.hv = f2s(R.top && R.top.speed);
+    if (R.cum && R.cum[10] != null) cells.push(["0\u201310 M", f2s(R.cum[10]), "s"]);
+    if (R.fly10) cells.push(["FLY 10", f2s(R.fly10.time), "s"]);
+    cells.push([`${run.target} M`, f2s(R.time), "s"]);
+  } else {
+    const pole = SETUPS[run.setup] && SETUPS[run.setup].pole, mid = settings.midOut;
+    p.strip = `${settings.solo ? "RUN SAVED" : "RUN DONE"} \u00b7 ${pole ? "POLE RUN" : "VAULT"}`; p.h = "LAST 5 M"; p.hv = f2s(R.last5 && R.last5.speed);
+    const c = contactsOf(run).find((x) => x.left && x.out === mid);
+    cells.push(["TOP", f2s(R.top && R.top.speed), "m/s"], ["LEFTS", String(R.steps && R.steps.lefts || "\u2013"), ""],
+      ["TAKEOFF", ft(R.takeoff && R.takeoff.outFt), ""], [`${mid}L MID`, c ? ft(spotFt(run, c)) : "\u2013", ""]);
+  }
+  cells.slice(0, 4).forEach(([k, v, u], i) => { p["k" + (i + 1)] = k; p["v" + (i + 1)] = v; p["u" + (i + 1)] = u; });
+  fetch("/show", { method: "POST", body: new URLSearchParams(p), cache: "no-store" }).catch(() => {});
+}
+// ---------------- sensor firmware update (over the sensor's Wi-Fi) ----------------
+const FIRMWARE_URL = "https://github.com/paytonpittspv/LiDAR-Sensor-App/releases/download/firmware/SpeedLidar.bin";
+let fwUpload = null;   // { pct, msg }
+function updateFirmware(file) {
+  if (!file) return;
+  if (!/\.bin$/i.test(file.name) || file.size < 100000) { toast("Pick the SpeedLidar.bin file."); return; }
+  fwUpload = { pct: 0, msg: "Sending to the sensor\u2026" }; render();
+  const x = new XMLHttpRequest();
+  x.open("POST", "/update");
+  x.setRequestHeader("Content-Type", "application/octet-stream");
+  x.upload.onprogress = (e) => { if (e.lengthComputable) { fwUpload.pct = Math.round((100 * e.loaded) / e.total); const el = $("#fwPct"); if (el) el.textContent = `${fwUpload.pct}%`; } };
+  x.onload = () => {
+    let j = null; try { j = JSON.parse(x.responseText); } catch (e) {}
+    fwUpload = j && j.ok ? { pct: 100, msg: "Updated. The sensor restarts by itself: reconnect to its Wi-Fi in a few seconds." } : { pct: 0, msg: `Update failed${j && j.error ? `: ${j.error}` : ""}. Nothing changed on the sensor.` };
+    render();
+  };
+  x.onerror = () => { fwUpload = { pct: 0, msg: "Lost the sensor during the update. If its screen says UPDATING, wait for it to finish; otherwise try again." }; render(); };
+  x.send(file);
+}
+function firmwareCardHTML() {
+  if (WEB_COPY) return "";
+  return `<div class="card"><div class="label">Sensor firmware</div>
+    <div class="small muted" style="margin:4px 0 10px">${sensor.connected && sensor.fw ? `The sensor is running <b>${esc(sensor.fw)}</b>.` : "Connect to the sensor to see its version."} To update it: with internet, <a href="${FIRMWARE_URL}">download SpeedLidar.bin</a> to Files; then on the SpeedLidar Wi-Fi, pick it here. Takes about 30 seconds.</div>
+    <label class="btn" style="cursor:pointer">Update firmware<input type="file" id="fwFile" accept=".bin,application/octet-stream" class="hidden"></label>
+    ${fwUpload ? `<div class="small" style="margin-top:8px"><b id="fwPct">${fwUpload.pct}%</b> ${esc(fwUpload.msg)}</div>` : ""}</div>`;
 }
 // no sensor: play a simulated run through the same live view, in real time
 function simulateRun() {
@@ -2221,7 +2316,7 @@ function settingsHTML() {
   h += `<h2>Vault setup</h2>${setupGuide("runway100")}${setupGuide("runway150")}`;
   h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">${WEB_COPY ? "This copy of the app opens with no connection at all." : "This is the sensor's page. Send runs to your home-screen app after each session."} ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
     <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
-    ${secureCardHTML()}${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}
+    ${secureCardHTML()}${firmwareCardHTML()}${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}
     <div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps. Simulated runs are marked and never sent.</div><div class="row"><button class="btn" data-act="demo-data">Add demo data</button>${runs.some((r) => r.sim) ? `<button class="btn" data-act="del-sim">Delete simulated runs</button>` : ""}<button class="btn danger" data-act="clear-all">Delete all runs</button></div></div>`;
   h += `<p class="small muted" style="text-align:center;margin-top:20px">PAYTON'S LiDAR SENSOR · designed by Payton Pitts</p>`;
   return h;
@@ -2249,6 +2344,7 @@ function render() {
   const vs = $("#voiceSw"); if (vs) vs.onchange = () => { settings.voice = vs.checked; saveSettings(); unlockAudio(); if (vs.checked) say("Voice on"); };
   const ct = $("#customTarget"); if (ct) ct.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); const b = document.querySelector('[data-act="cap-target-custom"]'); if (b) b.click(); } };
   const imp = $("#importFile"); if (imp) imp.onchange = () => importBackup(imp.files[0]);
+  const fwf = $("#fwFile"); if (fwf) fwf.onchange = () => updateFirmware(fwf.files[0]);
   const sf = $("#syncFile"); if (sf) sf.onchange = () => importBackup(sf.files[0]);
 }
 function nav(v, arg) { backStack.push([view, viewArg]); go(v, arg); }

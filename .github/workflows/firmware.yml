@@ -1,0 +1,66 @@
+name: Firmware release
+
+# Builds the sensor firmware with the real screen fonts (Barlow) and publishes SpeedLidar.bin on the
+# "firmware" release, where the app's Update firmware button points:
+#   https://github.com/paytonpittspv/LiDAR-Sensor-App/releases/download/firmware/SpeedLidar.bin
+# It also commits fonts.h made from Barlow, so a build from the Arduino IDE gets the same fonts.
+
+on:
+  push:
+    branches: [main]
+    paths: ["firmware/**", "src/**", "index.html"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: firmware-release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Screen fonts from Barlow (SIL Open Font License)
+        run: |
+          mkdir -p /tmp/fonts
+          for f in barlowcondensed/BarlowCondensed-ExtraBold barlowcondensed/BarlowCondensed-Bold barlow/Barlow-SemiBold; do
+            curl -sSfL -o "/tmp/fonts/$(basename $f).ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/$f.ttf"
+          done
+          pip install --quiet pillow
+          python3 firmware/make_fonts.py --fonts /tmp/fonts
+          g++ -std=c++17 -O2 -I firmware/SpeedLidar firmware/preview/preview.cpp -o /tmp/preview
+          mkdir -p firmware/preview/screens && /tmp/preview firmware/preview/screens
+          python3 -c "
+          from PIL import Image; import glob
+          for f in glob.glob('firmware/preview/screens/*.ppm'):
+              Image.open(f).resize((640, 340), Image.NEAREST).save(f[:-4] + '.png')"
+          rm -f firmware/preview/screens/*.ppm
+
+      - name: Commit the fonts and screen previews if they changed
+        run: |
+          git config user.name "firmware-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firmware/SpeedLidar/fonts.h firmware/preview/screens
+          if ! git diff --cached --quiet; then git commit -m "Screen fonts from Barlow + screen previews" && git push; fi
+
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install the ESP32 board package
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.12
+      - name: Build
+        run: |
+          arduino-cli compile --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" --output-dir build firmware/SpeedLidar
+          cp build/SpeedLidar.ino.bin SpeedLidar.bin
+          ls -la SpeedLidar.bin
+      - name: Publish on the "firmware" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view firmware >/dev/null 2>&1 || gh release create firmware --title "Sensor firmware (latest)" --notes "SpeedLidar.bin for the ESP32-S3 sensor. Update from the app: Settings → Sensor firmware."
+          gh release upload firmware SpeedLidar.bin --clobber
+          gh release edit firmware --notes "SpeedLidar.bin for the ESP32-S3 sensor, built from $(git rev-parse --short HEAD) on $(date -u +%Y-%m-%d). Update from the app: Settings → Sensor firmware, or flash it over USB."
