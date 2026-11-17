@@ -561,7 +561,7 @@ function drawDisplay() {
     st = strip("d-blue", "RUN DONE", E(j.who));
     body = `<div class="d-center"><div class="d-xl d-pulse">WORKING IT OUT</div><div class="d-sub">The result shows here in a second.</div></div>`;
   } else if (j.s === "result") {
-    st = strip("d-blue", j.strip || "RESULT", E((j.fl || "").split(" \u00b7 ")[0]));
+    st = strip("d-blue", j.strip || "RESULT", E((j.fl || "").split(" \u00b7 ")[0].split(" ")[0]));
     body = `<div class="d-res"><div><div class="d-label">${E(j.head)}</div><div class="d-num d-bluet">${E(j.hv)}<small>${E(j.hu)}</small></div></div>
       <div class="d-cells">${(j.cells || []).map(([k, v, u]) => `<div><div class="d-label">${E(k)}</div><div class="d-cell">${E(v)}<small>${E(u)}</small></div></div>`).join("")}</div></div>
       ${j.next ? `<div class="d-next"><span>UP NEXT</span><b>${E(j.next)}</b></div>` : ""}`;
@@ -579,7 +579,7 @@ function drawDisplay() {
         ${holding ? `<div class="d-hold"><span>HOLD STILL</span><div class="d-bar"><b style="width:${(j.hold * 100).toFixed(0)}%"></b></div></div>` : `<div class="d-cue">Stand at the start to arm</div>`}`
       : `<div class="d-center"><div class="d-xl">WAITING</div><div class="d-sub">Set up the next run on the controller.</div></div>`;
   }
-  el.innerHTML = `${st}<div class="d-body">${body}</div>
+  el.innerHTML = `${st}<div class="d-body s-${j ? (j.s === "boot" || j.s === "wifi" ? "ready" : j.s) : "none"}">${body}</div>
     <button class="d-menu" data-d="menu" aria-label="Display options">\u2022\u2022\u2022</button>
     ${disp.menu ? `<div class="d-pop"><button data-d="claim">Use this device as the controller</button><button data-d="close">Close the display</button></div>` : ""}`;
 }
