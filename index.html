@@ -863,7 +863,7 @@ const Store = (() => {
     const t = setTimeout(() => rej(new Error("timeout")), 5000);
     let rq; try { rq = indexedDB.open(NAME, 1); } catch (e) { clearTimeout(t); return rej(e); }
     rq.onupgradeneeded = () => rq.result.createObjectStore(OS);
-    rq.onsuccess = () => { clearTimeout(t); res(rq.result); };
+    rq.onsuccess = () => { clearTimeout(t); const d = rq.result; d.onclose = () => { if (db === d) db = null; }; d.onversionchange = () => d.close(); res(d); };
     rq.onerror = () => { clearTimeout(t); rej(rq.error); };
   });
   const run = (m, fn) => new Promise((res, rej) => {
@@ -903,15 +903,28 @@ const Store = (() => {
     if (SMALL.includes(k)) ls.set(k, v);
     if (k === "runs") ls.set("recent", v.slice(0, 3));
     if (mode === "local") {
-      if (k === "runs" && !ls.set("runs", v)) { onError(); return false; }
+      if (k === "runs" && !ls.set("runs", v)) { onError({ name: "QuotaExceededError" }); return false; }
       return true;
     }
-    try {
-      const t = db.transaction(OS, "readwrite"); t.objectStore(OS).put(v, k);
-      t.onabort = t.onerror = () => onError(t.error);
-      if (k === "runs") t.oncomplete = () => refreshInfo(false);
-    } catch (e) { onError(e); return false; }
+    write(k, true);
     return true;
+  }
+  // Safari sometimes closes the database behind the page's back (after switching Wi-Fi or a while in the
+  // background). Then a write fails although nothing is full: reopen it and try once more. Only a real
+  // "storage is full" error is reported as one.
+  function write(k, retry) {
+    const fail = (e) => {
+      if (retry && !(e && e.name === "QuotaExceededError")) {
+        db = null;
+        open().then((d) => { db = d; write(k, false); }, () => { mode = "local"; if (k === "runs" && !ls.set("runs", cache.runs)) onError({ name: "QuotaExceededError" }); });
+      } else onError(e);
+    };
+    try {
+      if (!db) throw new Error("closed");
+      const t = db.transaction(OS, "readwrite"); t.objectStore(OS).put(cache[k], k);
+      t.onabort = t.onerror = () => fail(t.error);
+      if (k === "runs") t.oncomplete = () => refreshInfo(false);
+    } catch (e) { fail(e); }
   }
   const info = () => ({ mode, persisted, usage, quota, secure: !!window.isSecureContext });
   return { ready: load(), get, set, info, protect: () => refreshInfo(true), onError: (f) => (onError = f) };
@@ -933,7 +946,7 @@ const timeLabel = (ts) => new Date(ts).toLocaleTimeString([], { hour: "numeric",
 // ---------------- storage ----------------
 const DB = { get: Store.get, set: Store.set };
 const standalone = () => { try { return navigator.standalone === true || matchMedia("(display-mode: standalone)").matches; } catch (e) { return false; } };
-Store.onError(() => toast("Couldn't save: this phone's storage is full. Export a backup in Settings, then delete old runs."));
+Store.onError((e) => toast(e && e.name === "QuotaExceededError" ? "Couldn't save: this phone's storage is full. Export a backup in Settings, then delete old runs." : "Couldn't save that change. Close and reopen the app, then try again."));
 let athletes = DB.get("athletes", []);
 let runs = DB.get("runs", []).map((r) => (r.setup === "polerun" ? Object.assign(r, { setup: "polerun100" }) : r));
 // vault counting (Nov 15): you start on the mark and the first step is a right, so L1 is the first left after it.

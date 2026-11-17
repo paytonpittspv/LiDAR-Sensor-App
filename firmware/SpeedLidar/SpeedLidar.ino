@@ -69,13 +69,19 @@ struct Asset { const char* type; const uint8_t* data; size_t len; const char* ca
 // states the phone sees
 enum { ST_IDLE = 0, ST_WAIT = 1, ST_SET = 2, ST_RUN = 3, ST_DONE = 4 };
 
-// Time of each reading, stored as the gap since the previous reading in 4 µs steps (2 bytes instead of 4).
-// That frees 30 KB, which the secure (https) connections need. tStartUs is the ESP32 time of reading 0;
-// tLastUs is the time of the newest reading as rebuilt from the gaps, so rounding never adds up.
-static const uint32_t T_STEP_US = 4;
-uint16_t* tBuf = nullptr;
-volatile uint32_t tStartUs = 0, tLastUs = 0;
-uint16_t* dBuf = nullptr;   // distance (cm)
+// One reading = 2 bytes: just the distance in cm. Its time isn't stored: the TF03 sends a frame every
+// 1 ms and the serial buffer holds them while the ESP32 is busy, so reading i is frame i. Times are spread
+// evenly between the real ESP32 times of the first and newest readings (tStartUs, tLastUs), which is what
+// the app did anyway (it fits time against frame number). Half the memory of storing times, so the
+// secure connections have room.
+uint16_t* sBuf = nullptr;
+volatile uint32_t tStartUs = 0, tLastUs = 0, fLast = 0;   // fLast: index of the newest reading
+portMUX_TYPE runMux = portMUX_INITIALIZER_UNLOCKED;
+static inline uint16_t distAt(uint32_t i) { return sBuf[i]; }
+// time (µs) of reading i, given a snapshot of the run's ends
+static inline uint32_t timeOfFrame(uint32_t i, uint32_t t0, uint32_t t1, uint32_t f1) {
+  return f1 ? t0 + (uint32_t)((uint64_t)(t1 - t0) * i / f1) : t0;
+}
 // (signal strength isn't stored: the app doesn't use it, and the memory goes to the https connections)
 
 volatile uint8_t  state     = ST_IDLE;
@@ -133,19 +139,17 @@ void storeSample(uint32_t now, uint16_t d, uint16_t s) {
   }
   if (nSamples >= MAX_SAMPLES) { recording = false; state = ST_DONE; return; }
 
-  if (nSamples == 0) { tStartUs = tLastUs = now; tBuf[0] = 0; }
-  else {
-    uint32_t gap = (now - tLastUs + T_STEP_US / 2) / T_STEP_US;
-    if (gap > 0xFFFF) gap = 0xFFFF;               // only after a 0.26 s dropout
-    tBuf[nSamples] = (uint16_t)gap; tLastUs += gap * T_STEP_US;
-  }
-  dBuf[nSamples] = d;
+  sBuf[nSamples] = d;
+  portENTER_CRITICAL(&runMux);
+  if (nSamples == 0) tStartUs = now;
+  tLastUs = now; fLast = nSamples;
+  portEXIT_CRITICAL(&runMux);
   nSamples++;
 
   if (validCm(d)) {
     lostCount = 0;
     if (!moved && nSamples > MOVE_WINDOW) {
-      uint16_t back = dBuf[nSamples - 1 - MOVE_WINDOW];
+      uint16_t back = distAt(nSamples - 1 - MOVE_WINDOW);
       if (validCm(back) && d > back + MOVE_START_CM) {
         if (++fastCount >= 50) {
           moved = true; state = ST_RUN; goIdx = nSamples;
@@ -153,7 +157,7 @@ void storeSample(uint32_t now, uint16_t d, uint16_t s) {
             // start position = closest reading in the 1.5 s before the run was confirmed
             uint16_t start = 0xFFFF;
             uint32_t from = nSamples > 1500 ? nSamples - 1500 : 0;
-            for (uint32_t i = from; i < nSamples; i++) if (validCm(dBuf[i]) && dBuf[i] < start) start = dBuf[i];
+            for (uint32_t i = from; i < nSamples; i++) { uint16_t x = distAt(i); if (validCm(x) && x < start) start = x; }
             stopAt = (start == 0xFFFF ? back : start) + stopCm;
           }
         }
@@ -174,13 +178,11 @@ void storeSample(uint32_t now, uint16_t d, uint16_t s) {
     if (away >= AWAY_MS) { recording = false; resetWait = true; state = ST_WAIT; return; }
     // only keep the most recent PRE_ROLL samples
     if (nSamples >= PRE_ROLL + 1000) {
-      uint32_t shift = 0;
-      for (uint32_t i = 1; i <= 1000; i++) shift += tBuf[i];
-      tStartUs += shift * T_STEP_US;
-      memmove(tBuf, tBuf + 1000, PRE_ROLL * sizeof(uint16_t));
-      tBuf[0] = 0;
-      memmove(dBuf, dBuf + 1000, PRE_ROLL * sizeof(uint16_t));
-      nSamples = PRE_ROLL;
+      portENTER_CRITICAL(&runMux);
+      tStartUs = timeOfFrame(1000, tStartUs, tLastUs, fLast); fLast -= 1000;
+      portEXIT_CRITICAL(&runMux);
+      memmove(sBuf, sBuf + 1000, (nSamples - 1000) * sizeof(uint16_t));
+      nSamples -= 1000;
     }
     return;
   }
@@ -195,7 +197,7 @@ void storeSample(uint32_t now, uint16_t d, uint16_t s) {
   if (nSamples > STOP_WINDOW && nSamples % 100 == 0 && validCm(d)) {
     uint32_t off = 0;
     for (uint32_t i = nSamples - STOP_WINDOW; i < nSamples; i++) {
-      uint16_t x = dBuf[i];
+      uint16_t x = distAt(i);
       if (!validCm(x) || x > d + 30 || x + 30 < d) off++;
     }
     if (off < STOP_WINDOW / 20) { recording = false; state = ST_DONE; }
@@ -280,11 +282,13 @@ size_t buildLive(char* json, size_t cap, long from) {
            (unsigned long)nSamples, (unsigned long)badFrames, (unsigned)limitCm, (unsigned)state, (unsigned long)sets, (unsigned long)goIdx,
            (validCm(d) && (gateCm == 0 || d < gateCm)) ? "true" : "false", certUntil[0] ? "true" : "false");
   if (from >= 0 && (state == ST_RUN || state == ST_DONE) && nSamples) {
-    uint32_t n = nSamples, i = (uint32_t)from, k = 0, j = 1, steps = 0;   // steps: time of reading i, in 4 µs
-    len += snprintf(json + len, cap - len, ",\"t0\":%lu,\"pts\":[", (unsigned long)tStartUs);
+    portENTER_CRITICAL(&runMux);
+    uint32_t n = nSamples, t0 = tStartUs, t1 = tLastUs, f1 = fLast;
+    portEXIT_CRITICAL(&runMux);
+    uint32_t i = (uint32_t)from, k = 0;
+    len += snprintf(json + len, cap - len, ",\"t0\":%lu,\"pts\":[", (unsigned long)t0);
     for (; i < n && k < 150 && len < (int)cap - 40; i += 20, k++) {
-      for (; j <= i; j++) steps += tBuf[j];
-      len += snprintf(json + len, cap - len, "%s[%lu,%u]", k ? "," : "", (unsigned long)(steps * T_STEP_US / 1000), dBuf[i]);
+      len += snprintf(json + len, cap - len, "%s[%lu,%u]", k ? "," : "", (unsigned long)((timeOfFrame(i, t0, t1, f1) - t0) / 1000), distAt(i));
     }
     len += snprintf(json + len, cap - len, "],\"next\":%lu", (unsigned long)i);
   }
@@ -313,15 +317,18 @@ void doStop() { recording = false; state = ST_IDLE; }
 template <typename Send> void streamData(Send send) {
   recording = false;
   delay(5);
-  uint32_t n = nSamples, hdr[2] = {n, (uint32_t)limitCm};
+  portENTER_CRITICAL(&runMux);
+  uint32_t n = nSamples, t0 = tStartUs, t1 = tLastUs, f1 = fLast;
+  portEXIT_CRITICAL(&runMux);
+  uint32_t hdr[2] = {n, (uint32_t)limitCm};
   send((const char*)hdr, sizeof(hdr));
   static uint8_t chunk[4096];
-  uint32_t i = 0, t = tStartUs;
+  uint32_t i = 0;
   while (i < n) {
     size_t len = 0;
     while (i < n && len + 8 <= sizeof(chunk)) {
-      if (i) t += tBuf[i] * T_STEP_US;
-      memcpy(chunk + len, &t, 4); memcpy(chunk + len + 4, &dBuf[i], 2); chunk[len + 6] = chunk[len + 7] = 0;
+      uint32_t t = timeOfFrame(i, t0, t1, f1); uint16_t d = distAt(i);
+      memcpy(chunk + len, &t, 4); memcpy(chunk + len + 4, &d, 2); chunk[len + 6] = chunk[len + 7] = 0;
       len += 8; i++;
     }
     send((const char*)chunk, len);
@@ -507,9 +514,8 @@ void setup() {
   Serial.begin(115200);
 
   // Grab the big buffers before Wi-Fi takes its share of memory.
-  tBuf = (uint16_t*)malloc(MAX_SAMPLES * sizeof(uint16_t));
-  dBuf = (uint16_t*)malloc(MAX_SAMPLES * sizeof(uint16_t));
-  if (!tBuf || !dBuf) {
+  sBuf = (uint16_t*)malloc(MAX_SAMPLES * sizeof(uint16_t));
+  if (!sBuf) {
     Serial.println("Not enough memory — lower MAX_SAMPLES");
     while (true) delay(1000);
   }
