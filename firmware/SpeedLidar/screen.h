@@ -129,7 +129,8 @@ static void bigNum(const char* v, float x, float y, int size, RGB col, const cha
 }
 
 // ---------- what to show (filled in by the firmware) ----------
-enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE };
+enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM };
+static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim"};
 struct Cell { char k[14], v[14], u[8]; };
 struct Model {
   Screen screen = S_BOOT;
@@ -274,6 +275,30 @@ static void drawNoLidar(const Model& M) {
   text(F_S13, "Check its cable and the power bank.", W / 2, 124, DIM, CENTER);
   foot("TF03 \xC2\xB7 115200 baud", M.fw);
 }
+// Aiming: bars close in from both sides toward a target in the middle; they meet (and the target lights)
+// when the beam is locked on the athlete. Red when weak, amber getting there, green when locked.
+static RGB aimColour(int sig) { return sig > 70 ? GREEN : sig > 35 ? AMBER : RED; }
+static void drawAim(const Model& M) {
+  RGB col = aimColour(M.sig);
+  strip(M, "AIMING", col);
+  text(F_B13, "SIGNAL", 10, 44, DIM);
+  const int n = 8; const float gap = 3, cx = W / 2.f, cy = 75, inner = 16, w = (cx - inner - 10 - (n - 1) * gap) / n;
+  int on = (int)lroundf(M.sig / 100.f * n);
+  for (int i = 0; i < n; i++) {   // i = 0 is the outermost pair
+    float h = 16 + 30.f * i / (n - 1), y = cy - h / 2; RGB c = i < on ? col : LINE;
+    rrect(10 + i * (w + gap), y, w, h, 2, c); rrect(W - 10 - w - i * (w + gap), y, w, h, 2, c);
+  }
+  bool locked = on >= n; RGB tc = locked ? col : LINE;
+  for (int j = (int)cy - 14; j <= (int)cy + 14; j++) for (int i = (int)cx - 14; i <= (int)cx + 14; i++) {
+    float d = hypotf(i + .5f - cx, j + .5f - cy), a = fmaxf(2.f - fabsf(d - 11), 0) ; if (a > 0) blend(i, j, tc, a > 1 ? 1 : a);
+    float b = 4.5f - d; if (b > 0) blend(i, j, tc, b > 1 ? 1 : b);
+  }
+  char v[8]; snprintf(v, sizeof v, "%d%%", M.sig);
+  text(F_XB34, v, 10, 134, FG);
+  char d[16]; if (M.distOk) { fmtDist(M, d, sizeof d, M.dist); if (!M.vault) strcat(d, " m"); } else strcpy(d, "-");
+  text(F_XB18, d, W - 10, 134, DIM, RIGHT);
+  foot(locked ? "Locked on" : "Turn the tripod slowly", locked ? "leave the tripod there" : "aim at athlete\xE2\x80\x99s back");
+}
 static void drawUpdate(const Model& M) {
   strip(M, "UPDATING", PURPLE);
   char v[8]; snprintf(v, sizeof v, "%d%%", M.updatePct);
@@ -294,6 +319,7 @@ static void draw(const Model& M) {
     case S_RESULT: drawResult(M); break;
     case S_NOLIDAR: drawNoLidar(M); break;
     case S_UPDATE: drawUpdate(M); break;
+    case S_AIM: drawAim(M); break;
   }
 }
 

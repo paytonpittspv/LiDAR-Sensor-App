@@ -169,19 +169,23 @@ function changeTag(R) {
 
 // ---------------- sensor ----------------
 // sensor states (from the firmware): 0 idle · 1 waiting for an athlete to stand still · 2 armed · 3 running · 4 done
-const sensor = { connected: false, d: null, s: 0, rate: 0, rec: false, moved: false, misses: 0, state: 0, sets: 0, go: 0, inZone: false, arm: null, cfg: "", phones: 0, fw: "" };
+const sensor = { connected: false, d: null, s: 0, rate: 0, rec: false, moved: false, misses: 0, state: 0, sets: 0, go: 0, inZone: false, arm: null, cfg: "", phones: 0, fw: "", role: null };
 let pollBusy = false;
 async function poll() {
   if (pollBusy) return; pollBusy = true;
   try {
     const live = view === "new" && cap.phase === "recording" && cap.liveFrom != null && !cap.sim;
     const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 900);
-    const j = await (await fetch(live ? `/live?from=${cap.liveFrom}` : "/live", { cache: "no-store", signal: ctl.signal })).json(); clearTimeout(to);
+    const j = await (await fetch(live ? `/live?dev=${DEVICE_ID}&from=${cap.liveFrom}` : `/live?dev=${DEVICE_ID}`, { cache: "no-store", signal: ctl.signal })).json(); clearTimeout(to);
     if (!sensor.connected) setTimeout(certSync, 400);
     sensor.connected = true; sensor.misses = 0;
     sensor.d = j.d > 10 && j.d < j.max ? j.d / 100 : null; sensor.s = j.s; sensor.rate = j.rate; sensor.rec = j.rec; sensor.moved = j.moved;
     sensor.state = j.state || 0; sensor.sets = j.sets || 0; sensor.go = j.go || 0; sensor.inZone = !!j.in;
     sensor.arm = j.arm != null ? j.arm : null; sensor.cfg = j.cfg || ""; sensor.phones = j.phones || 0; sensor.fw = j.fw || "";
+    sensor.role = j.role || "control";
+    // the first device on the sensor is the controller; any other one turns into the big display
+    if (sensor.role === "display" && !disp.on && !disp.dismissed) startDisplay();
+    else if (sensor.role === "control" && disp.on && !disp.manual) stopDisplay();
     if (live && j.pts) { liveAdd(j.pts); cap.liveFrom = j.next; }
     onLive();
   } catch (e) { if (++sensor.misses > 3) { sensor.connected = false; sensor.d = null; } }
@@ -346,9 +350,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 const cap = { phase: "setup", mode: settings.lastMode, athleteId: settings.lastAthlete, target: settings.lastTarget, setup: settings.lastSetup, run: null, lastRun: null, armedAt: 0, error: null,
   queue: (settings.lastQueue || (settings.lastAthlete ? [settings.lastAthlete] : [])).filter((id) => athletes.some((x) => x.id === id)),
   session: DB.get("session", null), setsSeen: 0, liveFrom: null, live: null, sim: null,
-  // several devices: the one that armed is the leader (re-arms, puts the result on the sensor's screen);
-  // the others follow the sensor and save the same runs
-  leader: true, armId: null, armSeen: null };
+  armId: null };
 const saveSession = () => DB.set("session", cap.session);
 const firstName = (id) => athleteById(id).name.split(" ")[0];
 function nextUp(id) { const q = cap.queue; if (q.length < 2) return id; const i = q.indexOf(id); return q[(i + 1) % q.length]; }
@@ -369,14 +371,14 @@ function armRule() {
 async function arm(now) {
   cap.error = null; cap.run = null; cap.live = null; cap.liveFrom = null; cap.sim = null;
   const r = armRule();
-  cap.setsSeen = sensor.sets; cap.leader = true;
+  cap.setsSeen = sensor.sets;
   if (sensor.connected) {
     const a = athleteById(cap.athleteId), sprint = cap.mode === "sprint", S = SETUPS[cap.setup] || {};
     const cfg = { dev: DEVICE_ID, mode: cap.mode, setup: cap.setup, target: cap.target, name: a.name, kg: a.kg || null };
     const body = new URLSearchParams({ stop: r.stop, gate: r.gate, hold: r.hold, max: r.max, cfg: JSON.stringify(cfg), who: a.name.slice(0, 23),
       evs: sprint ? "SPRINT" : S.pole ? "POLE RUN" : "VAULT", evl: sprint ? `Stop at ${cap.target} m` : `${S.boxFt >= 150 ? "Long" : "Short"} \u00b7 ${S.boxFt} ft`, tgt: sprint ? cap.target : 0 });
     if (now) body.set("now", "1");
-    try { const j = await (await fetch("/arm", { method: "POST", body, cache: "no-store" })).json(); if (j && j.arm != null) { cap.armId = j.arm; cap.armSeen = j.arm; } }
+    try { const j = await (await fetch("/arm", { method: "POST", body, cache: "no-store" })).json(); if (j && j.arm != null) cap.armId = j.arm; }
     catch (e) { cap.error = "Couldn't reach the sensor. Join its Wi-Fi (SpeedLidar) and try again."; }
   }
   cap.phase = "waiting"; cap.armedAt = Date.now();
@@ -385,30 +387,8 @@ async function arm(now) {
 function toReady() { cap.phase = "ready"; cap.setsSeen = sensor.sets; readySignal(); render(); }
 async function stopNow() { try { await fetch("/stop", { cache: "no-store" }); } catch (e) {} }
 let fetching = false;
-// another phone/iPad set up a run on the sensor: copy its setup and record the same run
-function followCheck() {
-  if (sensor.arm == null || sensor.arm === cap.armSeen) return;
-  let c = null; try { c = JSON.parse(sensor.cfg || "null"); } catch (e) {}
-  if (!c || c.dev === DEVICE_ID) { cap.armSeen = sensor.arm; return; }
-  // busy with a run of our own: catch up once it's done
-  if (["recording", "processing", "review"].includes(cap.phase) || fetching) return;
-  cap.armSeen = sensor.arm;
-  if (sensor.state === 0) return;   // already stopped again
-  let a = athletes.find((x) => x.name.trim().toLowerCase() === String(c.name || "").trim().toLowerCase());
-  if (!a && c.name) { a = { id: uid(), name: c.name, kg: c.kg || null }; athletes.push(a); saveAthletes(); }
-  cap.mode = c.mode === "sprint" ? "sprint" : "vault";
-  if (cap.mode === "sprint") cap.target = c.target || cap.target; else if (SETUPS[c.setup]) cap.setup = c.setup;
-  if (a) cap.athleteId = a.id;
-  cap.leader = false; cap.armId = sensor.arm;
-  cap.error = null; cap.run = null; cap.live = null; cap.liveFrom = null;
-  cap.setsSeen = sensor.state >= 2 ? sensor.sets - 1 : sensor.sets;
-  cap.phase = "waiting"; cap.armedAt = Date.now();
-  toast(`Following the other device: ${a ? a.name : "next run"}`);
-  render();
-}
 function onLive() {
   if (view !== "new" || cap.sim) return;
-  followCheck();
   if (cap.phase === "waiting" && sensor.sets > cap.setsSeen && sensor.state >= 2) toReady();
   else if (cap.phase === "ready" && sensor.state === 1) { cap.phase = "waiting"; toast("They stepped away. Waiting for someone to stand in again."); render(); }
   if (cap.phase === "ready" && sensor.state === 3) startLive(Math.max(0, sensor.go - 1500));
@@ -485,18 +465,6 @@ function ctxFor(c) {
 function finishCapture(raw) {
   const res = Engine.process(raw, ctxFor(cap));
   const live = !cap.simRun;
-  if (!cap.leader && live) {
-    // following another device: keep the run (or skip a bad one) and wait for its next setup
-    if (res.error) toast(res.error);
-    else {
-      const run = { id: uid(), ts: Date.now(), athleteId: cap.athleteId, mode: cap.mode, res };
-      if (cap.mode === "sprint") run.target = cap.target; else run.setup = cap.setup;
-      keepRun(run); cap.athleteId = run.athleteId;
-      cap.lastRun = run; cap.lastSaved = true;
-      if (settings.voice) say(speech(run));
-    }
-    cap.phase = "waiting"; cap.setsSeen = sensor.sets; render(); return;
-  }
   if (res.error) {
     // a false start or a bad run: the same athlete goes again
     toast(res.error + " Same athlete, go again.");
@@ -518,7 +486,7 @@ function finishCapture(raw) {
 function showOnSensor(run, armId) {
   const R = run.res, f2s = (v) => (v != null && isFinite(v) ? v.toFixed(2) : "\u2013"), ft = (v) => (v != null && isFinite(v) ? ftLabel(v) : "\u2013");
   const n = (cap.session ? cap.session.ids.filter((id) => { const x = runs.find((r) => r.id === id); return x && x.athleteId === run.athleteId; }).length : 0) + 1;
-  const p = { run: armId, hu: "m/s", fl: `${firstName(run.athleteId)} \u00b7 run ${n}`, fr: sensor.phones > 1 ? `on ${sensor.phones} devices` : settings.solo ? "saved to phone" : "on the phone" };
+  const p = { run: armId, hu: "m/s", fl: `${firstName(run.athleteId)} \u00b7 run ${n}`, fr: settings.solo ? "saved to phone" : "on the phone" };
   const cells = [];
   if (run.mode === "sprint") {
     p.strip = `${settings.solo ? "RUN SAVED" : "RUN DONE"} \u00b7 SPRINT`; p.h = "TOP SPEED"; p.hv = f2s(R.top && R.top.speed);
@@ -534,6 +502,94 @@ function showOnSensor(run, armId) {
   }
   cells.slice(0, 4).forEach(([k, v, u], i) => { p["k" + (i + 1)] = k; p["v" + (i + 1)] = v; p["u" + (i + 1)] = u; });
   fetch("/show", { method: "POST", body: new URLSearchParams(p), cache: "no-store" }).catch(() => {});
+}
+// ---------------- big display (a second device, e.g. an iPad on the tripod facing the athletes) ----------------
+// Shows what the sensor's own screen shows, big: who's up next, the live run, the result.
+const disp = { on: false, manual: false, dismissed: false, busy: false, data: null, menu: false };
+function startDisplay(manual) {
+  if (disp.on) return;
+  Object.assign(disp, { on: true, manual: !!manual, menu: false, data: null });
+  let el = $("#disp"); if (!el) { el = document.createElement("div"); el.id = "disp"; document.body.appendChild(el); }
+  el.onclick = (e) => {
+    const b = e.target.closest("[data-d]"); if (!b) return;
+    const a = b.dataset.d;
+    if (a === "menu") { disp.menu = !disp.menu; drawDisplay(); }
+    else if (a === "claim") fetch(`/claim?dev=${DEVICE_ID}`, { cache: "no-store" }).then(() => { sensor.role = "control"; disp.dismissed = true; stopDisplay(); toast("This device is the controller now."); }).catch(() => toast("Couldn't reach the sensor."));
+    else if (a === "close") { disp.dismissed = true; stopDisplay(); }
+  };
+  document.documentElement.classList.add("disp-on");
+  try { if (!wakeLock && navigator.wakeLock) navigator.wakeLock.request("screen").then((w) => { wakeLock = w; w.addEventListener("release", () => (wakeLock = null)); }).catch(() => {}); } catch (e) {}
+  drawDisplay(); dispLoop();
+}
+function stopDisplay() {
+  disp.on = false; const el = $("#disp"); if (el) el.remove();
+  document.documentElement.classList.remove("disp-on"); render();
+}
+async function dispLoop() {
+  if (!disp.on) return;
+  try {
+    const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 1500);
+    disp.data = await (await fetch("/screen", { cache: "no-store", signal: ctl.signal })).json(); clearTimeout(to); disp.lost = 0;
+  } catch (e) { if (++disp.lost > 8) disp.data = null; }
+  drawDisplay();
+  setTimeout(dispLoop, 200);
+}
+function drawDisplay() {
+  const el = $("#disp"); if (!el) return;
+  const j = disp.data, E = esc;
+  const dist = (m, vault, dp = 2) => (m == null ? "\u2013" : vault ? ftLabel(m / FT) : `${m.toFixed(dp)}<small>m</small>`);
+  const strip = (cls, label, right = "") => `<div class="d-strip ${cls}"><span>${E(label)}</span><span>${right}</span></div>`;
+  const evl = j ? [j.evs, j.evl].filter(Boolean).map(E).join(" \u00b7 ") : "";
+  let body = "", st = "";
+  if (!j) { st = strip("d-dim", "NO SENSOR"); body = `<div class="d-center"><div class="d-xl">JOIN THE WI-FI</div><div class="d-sub">SpeedLidar \u00b7 password vault1234</div></div>`; }
+  else if (j.s === "aim") {
+    const col = j.sig > 70 ? "d-green" : j.sig > 35 ? "d-amber" : "d-red", n = 8, on = Math.round((j.sig / 100) * n);
+    let bars = ""; for (let i = 0; i < n; i++) bars += `<i class="${i < on ? "on" : ""}" style="height:${30 + 70 * i / (n - 1)}%"></i>`;
+    let rbars = ""; for (let i = n - 1; i >= 0; i--) rbars += `<i class="${i < on ? "on" : ""}" style="height:${30 + 70 * i / (n - 1)}%"></i>`;
+    st = strip(col, "AIMING", `${j.sig}%`);
+    body = `<div class="d-aim ${col}"><div class="d-bars">${bars}</div><div class="d-target ${on >= n ? "on" : ""}"></div><div class="d-bars">${rbars}</div></div>
+      <div class="d-sub">${on >= n ? "Locked on: leave the tripod there" : "Turn the tripod slowly \u00b7 aim at athlete\u2019s back"}</div>`;
+  } else if (j.s === "armed") {
+    st = strip("d-pink", "ARMED", E(j.who));
+    body = `<div class="d-center d-pulse"><div class="d-go">GO WHEN</div><div class="d-go d-pinkt">READY</div></div>`;
+  } else if (j.s === "rec") {
+    const prog = j.runTarget > 0 ? Math.min(1, j.runDist / j.runTarget) : 0;
+    st = strip("d-purple", "RECORDING", E(j.who));
+    body = `<div class="d-label">SPEED</div><div class="d-num">${j.speed.toFixed(2)}<small>m/s</small></div>
+      <div class="d-bar"><b style="width:${(prog * 100).toFixed(1)}%"></b></div>`;
+  } else if (j.s === "saving") {
+    st = strip("d-blue", "RUN DONE", E(j.who));
+    body = `<div class="d-center"><div class="d-xl d-pulse">WORKING IT OUT</div><div class="d-sub">The result shows here in a second.</div></div>`;
+  } else if (j.s === "result") {
+    st = strip("d-blue", j.strip || "RESULT", E((j.fl || "").split(" \u00b7 ")[0]));
+    body = `<div class="d-res"><div><div class="d-label">${E(j.head)}</div><div class="d-num d-bluet">${E(j.hv)}<small>${E(j.hu)}</small></div></div>
+      <div class="d-cells">${(j.cells || []).map(([k, v, u]) => `<div><div class="d-label">${E(k)}</div><div class="d-cell">${E(v)}<small>${E(u)}</small></div></div>`).join("")}</div></div>
+      ${j.next ? `<div class="d-next"><span>UP NEXT</span><b>${E(j.next)}</b></div>` : ""}`;
+  } else if (j.s === "nolidar") {
+    st = strip("d-amber", "NO LIDAR");
+    body = `<div class="d-center"><div class="d-xl d-ambert">NO SIGNAL</div><div class="d-sub">The LiDAR isn\u2019t sending anything. Check its cable and the power bank.</div></div>`;
+  } else if (j.s === "update") {
+    st = strip("d-purple", "UPDATING");
+    body = `<div class="d-center"><div class="d-num">${j.pct}%</div><div class="d-bar"><b style="width:${j.pct}%"></b></div></div>`;
+  } else {
+    // ready / boot / wi-fi: who's up next
+    const holding = j.inZone && j.hold > 0.15;
+    st = strip(j.armed ? "d-green" : "d-dim", j.armed ? "READY" : "WAITING", j.dist != null ? dist(j.dist, j.vault) : "");
+    body = j.armed && j.who ? `<div class="d-label">UP NEXT</div><div class="d-name">${E(j.who)}</div><div class="d-ev">${evl}</div>
+        ${holding ? `<div class="d-hold"><span>HOLD STILL</span><div class="d-bar"><b style="width:${(j.hold * 100).toFixed(0)}%"></b></div></div>` : `<div class="d-cue">Stand at the start to arm</div>`}`
+      : `<div class="d-center"><div class="d-xl">WAITING</div><div class="d-sub">Set up the next run on the controller.</div></div>`;
+  }
+  el.innerHTML = `${st}<div class="d-body">${body}</div>
+    <button class="d-menu" data-d="menu" aria-label="Display options">\u2022\u2022\u2022</button>
+    ${disp.menu ? `<div class="d-pop"><button data-d="claim">Use this device as the controller</button><button data-d="close">Close the display</button></div>` : ""}`;
+}
+function devicesCardHTML() {
+  if (WEB_COPY) return "";
+  const role = sensor.connected ? sensor.role : null;
+  return `<div class="card"><div class="label">Devices</div>
+    <div class="small muted" style="margin:4px 0 10px">${role === "control" ? "This device is the <b>controller</b>: it sets up runs and saves them." : role === "display" ? "This device is a <b>display</b>: it shows the runs big for the athletes, and doesn\u2019t save them." : "Connect to the sensor to see this device\u2019s role."}
+      The first device to connect is the controller; any other one becomes a big display (an iPad on the tripod, facing the athletes).${sensor.phones > 1 ? ` ${sensor.phones} devices are on the sensor now.` : ""}</div>
+    <div class="row"><button class="btn" data-act="disp-show">Show the big display</button>${role === "display" ? `<button class="btn" data-act="disp-claim">Make this the controller</button>` : ""}</div></div>`;
 }
 // ---------------- sensor firmware update (over the sensor's Wi-Fi) ----------------
 const FIRMWARE_URL = "https://github.com/paytonpittspv/LiDAR-Sensor-App/releases/download/firmware/SpeedLidar.bin";
@@ -1470,7 +1526,7 @@ function settingsHTML() {
   h += `<h2>Vault setup</h2>${setupGuide("runway100")}${setupGuide("runway150")}`;
   h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">${WEB_COPY ? "This copy of the app opens with no connection at all." : "This is the sensor's page. Send runs to your home-screen app after each session."} ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
     <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
-    ${secureCardHTML()}${firmwareCardHTML()}${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}
+    ${secureCardHTML()}${devicesCardHTML()}${firmwareCardHTML()}${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}
     <div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps. Simulated runs are marked and never sent.</div><div class="row"><button class="btn" data-act="demo-data">Add demo data</button>${runs.some((r) => r.sim) ? `<button class="btn" data-act="del-sim">Delete simulated runs</button>` : ""}<button class="btn danger" data-act="clear-all">Delete all runs</button></div></div>`;
   h += `<p class="small muted" style="text-align:center;margin-top:20px">PAYTON'S LiDAR SENSOR · designed by Payton Pitts</p>`;
   return h;
@@ -1542,6 +1598,8 @@ document.addEventListener("click", (e) => {
     case "cap-stop": if (cap.sim) { cap.sim = null; arm(); break; } stopNow().then(() => { if (cap.phase === "recording") download(); else arm(); }); break;
     case "cap-sim": simulateRun(); break;
     case "cap-sim-in": toReady(); break;
+    case "disp-show": disp.dismissed = false; startDisplay(true); break;
+    case "disp-claim": fetch(`/claim?dev=${DEVICE_ID}`, { cache: "no-store" }).then(() => { sensor.role = "control"; toast("This device is the controller now."); render(); }).catch(() => toast("Couldn't reach the sensor.")); break;
     case "cap-armnow": if (sensor.connected) arm(true); else toReady(); break;
     case "cap-rewait": arm(); break;
     case "chime-kind": settings.chime = v; saveSettings(); unlockAudio(); chime(); render(); break;

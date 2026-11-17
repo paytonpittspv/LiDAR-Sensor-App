@@ -21,6 +21,7 @@ int main(int argc, char** argv) {
   M.inZone = true; M.hold = .6f; draw(M); save(out + "/ready_hold.ppm");
   { Model S = M; S.vault = false; strcpy(S.evShort, "SPRINT"); strcpy(S.evLine, "Stop at 30 m"); S.inZone = false; draw(S); save(out + "/ready_sprint.ppm"); }
   { Model S = M; S.armedCfg = false; S.inZone = false; draw(S); save(out + "/ready_idle.ppm"); }
+  { Model A = M; A.screen = S_AIM; A.inZone = false; A.sig = 25; draw(A); save(out + "/aim_weak.ppm"); A.sig = 55; draw(A); save(out + "/aim_mid.ppm"); A.sig = 100; draw(A); save(out + "/aim_locked.ppm"); }
   M.screen = S_ARMED; M.t = 0; draw(M); save(out + "/armed.ppm");
   M.screen = S_REC; M.speed = 8.93f; M.runDist = 28.4f; M.runTarget = 42.0f; M.runTime = 4.2f; draw(M); save(out + "/rec.ppm");
   M.screen = S_SAVING; draw(M); save(out + "/saving.ppm");
