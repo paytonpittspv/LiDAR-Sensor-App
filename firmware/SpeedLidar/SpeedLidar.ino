@@ -389,8 +389,10 @@ const char* installCert(const String& pem) {
   return nullptr;
 }
 size_t buildTls(char* json, size_t cap) {
-  return snprintf(json, cap, "{\"host\":\"%s\",\"secure\":%s,\"until\":%s%s%s,\"running\":%s,\"heap\":%lu}", HOST, certUntil[0] ? "true" : "false",
-                  certUntil[0] ? "\"" : "", certUntil[0] ? certUntil : "null", certUntil[0] ? "\"" : "", https ? "true" : "false", (unsigned long)ESP.getFreeHeap());
+  return snprintf(json, cap, "{\"host\":\"%s\",\"secure\":%s,\"until\":%s%s%s,\"running\":%s,\"heap\":%lu,\"biggest\":%lu,\"lowest\":%lu}", HOST, certUntil[0] ? "true" : "false",
+                  certUntil[0] ? "\"" : "", certUntil[0] ? certUntil : "null", certUntil[0] ? "\"" : "", https ? "true" : "false", (unsigned long)ESP.getFreeHeap(),
+                  // biggest single free block, and the lowest free memory since power-on (shows if a secure connection ran it out)
+                  (unsigned long)ESP.getMaxAllocHeap(), (unsigned long)ESP.getMinFreeHeap());
 }
 
 // ---- https handlers ----
@@ -433,7 +435,7 @@ static esp_err_t hsData(httpd_req_t* r) {
   return httpd_resp_send_chunk(r, nullptr, 0);
 }
 static esp_err_t hsTls(httpd_req_t* r) {
-  char json[200]; size_t n = buildTls(json, sizeof(json));
+  char json[260]; size_t n = buildTls(json, sizeof(json));
   httpd_resp_set_type(r, "application/json"); httpd_resp_set_hdr(r, "Cache-Control", "no-store");
   return httpd_resp_send(r, json, n);
 }
@@ -546,7 +548,7 @@ void setup() {
                          server.send(200, "text/plain", "waiting"); });
   server.on("/stop", [] { doStop(); server.send(200, "text/plain", "stopped"); });
   server.on("/data", handleData);
-  server.on("/tls", [] { char json[200]; buildTls(json, sizeof(json)); server.sendHeader("Cache-Control", "no-store"); server.send(200, "application/json", json); });
+  server.on("/tls", [] { char json[260]; buildTls(json, sizeof(json)); server.sendHeader("Cache-Control", "no-store"); server.send(200, "application/json", json); });
   server.on("/csr", [] { server.sendHeader("Cache-Control", "no-store"); server.send(200, "text/plain", makeCsr()); });
   server.on("/cert", HTTP_POST, [] {
     const char* err = installCert(server.arg("plain"));
