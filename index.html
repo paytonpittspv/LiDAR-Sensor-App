@@ -329,9 +329,11 @@ html.disp-on,html.disp-on body{overflow:hidden}
 .d-xl{font-size:min(24vh,13vw);line-height:.9}
 .d-sub{font-size:min(7vh,4.6vw);color:#9c95b8;font-weight:700;text-align:center;line-height:1.15}
 .d-go{font-size:min(38vh,16vw);line-height:.86;white-space:nowrap}
+.s-armed{padding:2.4vw;justify-content:center;align-items:center}
+.d-fit{line-height:.84;white-space:nowrap;text-align:center;letter-spacing:-.01em}
 .d-pulse{animation:dpulse 1.6s ease-in-out infinite}
 @keyframes dpulse{50%{opacity:.55}}
-#disp:has(.d-go){box-shadow:inset 0 0 0 1.6vw #ff2d8a;animation:dframe 1.6s ease-in-out infinite}
+#disp:has(.d-fit){box-shadow:inset 0 0 0 1.6vw #ff2d8a;animation:dframe 1.6s ease-in-out infinite}
 @keyframes dframe{50%{box-shadow:inset 0 0 0 1.6vw rgba(255,45,138,.35)}}
 .s-result .d-num{font-size:min(44vh,30vw)}
 .d-cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(20vw,1fr));gap:2vh 3vw}
@@ -368,7 +370,7 @@ html.disp-on,html.disp-on body{overflow:hidden}
   .d-bar{height:min(3vh,4.4vw)}
   .d-aim{flex-direction:row;max-height:45vh}
 }
-@media (prefers-reduced-motion:reduce){.d-pulse,#disp:has(.d-go){animation:none}}
+@media (prefers-reduced-motion:reduce){.d-pulse,#disp:has(.d-fit){animation:none}}
 </style>
 </head>
 <body>
@@ -1460,8 +1462,8 @@ function drawDisplay() {
     body = `<div class="d-aim ${col}"><div class="d-bars">${bars}</div><div class="d-target ${on >= n ? "on" : ""}"></div><div class="d-bars">${rbars}</div></div>
       <div class="d-sub">${on >= n ? "Locked on: leave the tripod there" : "Turn the tripod slowly \u00b7 aim at athlete\u2019s back"}</div>`;
   } else if (j.s === "armed") {
-    st = strip("d-pink", "ARMED", E(j.who));
-    body = `<div class="d-center d-pulse"><div class="d-go">GO WHEN</div><div class="d-go d-pinkt">READY</div></div>`;
+    st = "";   // no strip: the pink frame says armed, the words get the whole screen
+    body = `<div class="d-fit d-pulse">${innerHeight > innerWidth ? `<div>GO</div><div>WHEN</div>` : `<div>GO WHEN</div>`}<div class="d-pinkt">READY</div></div>`;
   } else if (j.s === "rec") {
     const prog = j.runTarget > 0 ? Math.min(1, j.runDist / j.runTarget) : 0;
     st = strip("d-purple", "RECORDING", E(j.who));
@@ -1492,6 +1494,14 @@ function drawDisplay() {
   el.innerHTML = `${st}<div class="d-body s-${j ? (j.s === "boot" || j.s === "wifi" ? "ready" : j.s) : "none"}">${body}</div>
     <button class="d-menu" data-d="menu" aria-label="Display options">\u2022\u2022\u2022</button>
     ${disp.menu ? `<div class="d-pop"><button data-d="claim">Use this device as the controller</button><button data-d="close">Close the display</button></div>` : ""}`;
+  // GO WHEN READY: as big as the screen allows (2 lines across, 3 when the screen stands up)
+  const fit = el.querySelector(".d-fit");
+  if (fit) {
+    const box = fit.parentElement, cw = box.clientWidth, ch = box.clientHeight;
+    fit.style.fontSize = "100px";
+    const k = Math.min(cw / fit.scrollWidth, ch / fit.scrollHeight);
+    fit.style.fontSize = `${Math.floor(100 * k * 0.97)}px`;
+  }
 }
 function devicesCardHTML() {
   if (WEB_COPY) return "";

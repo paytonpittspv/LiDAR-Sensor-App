@@ -550,8 +550,8 @@ function drawDisplay() {
     body = `<div class="d-aim ${col}"><div class="d-bars">${bars}</div><div class="d-target ${on >= n ? "on" : ""}"></div><div class="d-bars">${rbars}</div></div>
       <div class="d-sub">${on >= n ? "Locked on: leave the tripod there" : "Turn the tripod slowly \u00b7 aim at athlete\u2019s back"}</div>`;
   } else if (j.s === "armed") {
-    st = strip("d-pink", "ARMED", E(j.who));
-    body = `<div class="d-center d-pulse"><div class="d-go">GO WHEN</div><div class="d-go d-pinkt">READY</div></div>`;
+    st = "";   // no strip: the pink frame says armed, the words get the whole screen
+    body = `<div class="d-fit d-pulse">${innerHeight > innerWidth ? `<div>GO</div><div>WHEN</div>` : `<div>GO WHEN</div>`}<div class="d-pinkt">READY</div></div>`;
   } else if (j.s === "rec") {
     const prog = j.runTarget > 0 ? Math.min(1, j.runDist / j.runTarget) : 0;
     st = strip("d-purple", "RECORDING", E(j.who));
@@ -582,6 +582,14 @@ function drawDisplay() {
   el.innerHTML = `${st}<div class="d-body s-${j ? (j.s === "boot" || j.s === "wifi" ? "ready" : j.s) : "none"}">${body}</div>
     <button class="d-menu" data-d="menu" aria-label="Display options">\u2022\u2022\u2022</button>
     ${disp.menu ? `<div class="d-pop"><button data-d="claim">Use this device as the controller</button><button data-d="close">Close the display</button></div>` : ""}`;
+  // GO WHEN READY: as big as the screen allows (2 lines across, 3 when the screen stands up)
+  const fit = el.querySelector(".d-fit");
+  if (fit) {
+    const box = fit.parentElement, cw = box.clientWidth, ch = box.clientHeight;
+    fit.style.fontSize = "100px";
+    const k = Math.min(cw / fit.scrollWidth, ch / fit.scrollHeight);
+    fit.style.fontSize = `${Math.floor(100 * k * 0.97)}px`;
+  }
 }
 function devicesCardHTML() {
   if (WEB_COPY) return "";
