@@ -21,6 +21,14 @@ FONTS = ('@font-face{font-family:"Report Sans";src:url(data:font/woff;base64,%s)
 
 app = read("app.js").replace("/*__REPORT__*/", read("report.js"))
 html = read("shell.html").replace("/*__FONTS__*/", FONTS).replace("/*__ENGINE__*/", read("engine.js")).replace("/*__APP__*/", app)
+# The Home Screen icon goes inside the page itself. "Add to Home Screen" then never has to fetch it, which
+# matters on the sensor: it takes one secure connection at a time, and a missed fetch leaves iOS with a
+# screenshot instead of the icon.
+import base64 as _b64
+def _data_uri(name):
+    return "data:image/png;base64," + _b64.b64encode(open(os.path.join(ROOT, "icons", name), "rb").read()).decode()
+html = html.replace('href="icons/apple-touch-icon.png"', 'sizes="180x180" href="' + _data_uri("apple-touch-icon.png") + '"')
+html = html.replace('href="icons/favicon-32.png"', 'href="' + _data_uri("favicon-32.png") + '"')
 assert ")rawliteral" not in html, "page contains the raw-string terminator"
 
 open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(html)
