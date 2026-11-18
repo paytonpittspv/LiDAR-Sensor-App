@@ -183,6 +183,7 @@ async function poll() {
     sensor.state = j.state || 0; sensor.sets = j.sets || 0; sensor.go = j.go || 0; sensor.inZone = !!j.in;
     sensor.arm = j.arm != null ? j.arm : null; sensor.cfg = j.cfg || ""; sensor.phones = j.phones || 0; sensor.fw = j.fw || "";
     sensor.role = j.role || "control";
+    if (j.pick != null) { sensor.pick = j.pick; sensor.pickName = j.pickName || ""; takePick(); }
     // the first device on the sensor is the controller; any other one turns into the big display
     if (sensor.role === "display" && !disp.on && !disp.dismissed) startDisplay();
     else if (sensor.role === "control" && disp.on && !disp.manual) stopDisplay();
@@ -378,6 +379,9 @@ async function arm(now) {
     const body = new URLSearchParams({ stop: r.stop, gate: r.gate, hold: r.hold, max: r.max, cfg: JSON.stringify(cfg), who: a.name.slice(0, 23),
       evs: sprint ? "SPRINT" : S.pole ? "POLE RUN" : "VAULT", evl: sprint ? `Stop at ${cap.target} m` : `${S.boxFt >= 150 ? "Long" : "Short"} \u00b7 ${S.boxFt} ft`, tgt: sprint ? cap.target : 0 });
     if (now) body.set("now", "1");
+    const seen = new Set(), names = [];
+    for (const id of [...(cap.queue || []), ...athletes.map((x) => x.id)]) { const x = athleteById(id); if (x && x.name && !seen.has(x.id)) { seen.add(x.id); names.push(x.name.slice(0, 23)); } }
+    body.set("roster", names.slice(0, 40).join("\n"));
     try { const j = await (await fetch("/arm", { method: "POST", body, cache: "no-store" })).json(); if (j && j.arm != null) cap.armId = j.arm; }
     catch (e) { cap.error = "Couldn't reach the sensor. Join its Wi-Fi (SpeedLidar) and try again."; }
   }
@@ -387,6 +391,20 @@ async function arm(now) {
 function toReady() { cap.phase = "ready"; cap.setsSeen = sensor.sets; readySignal(); render(); }
 async function stopNow() { try { await fetch("/stop", { cache: "no-store" }); } catch (e) {} }
 let fetching = false;
+// the display (iPad on the bench) picked who's up next: set them up, keeping the same test
+function takePick() {
+  if (sensor.role !== "control" || disp.on) return;
+  if (cap.pickSeen == null) { cap.pickSeen = sensor.pick; return; }   // older picks, from before we connected
+  if (sensor.pick === cap.pickSeen) return;
+  cap.pickSeen = sensor.pick;
+  const n = sensor.pickName.trim().toLowerCase(), a = athletes.find((x) => x.name.trim().toLowerCase().slice(0, 23) === n);
+  if (!a || a.id === cap.athleteId && cap.phase !== "setup") return;
+  cap.athleteId = a.id;
+  if (view === "new" && !cap.sim && (cap.phase === "waiting" || cap.phase === "ready")) {
+    toast(`${a.name} is up (picked on the display)`);
+    arm(sensor.state === 2);   // already standing ready: stay armed for the new athlete
+  } else render();
+}
 function onLive() {
   if (view !== "new" || cap.sim) return;
   if (cap.phase === "waiting" && sensor.sets > cap.setsSeen && sensor.state >= 2) toReady();
@@ -505,7 +523,7 @@ function showOnSensor(run, armId) {
 }
 // ---------------- big display (a second device, e.g. an iPad on the tripod facing the athletes) ----------------
 // Shows what the sensor's own screen shows, big: who's up next, the live run, the result.
-const disp = { on: false, manual: false, dismissed: false, busy: false, data: null, menu: false };
+const disp = { on: false, manual: false, dismissed: false, busy: false, data: null, menu: false, picker: false, pending: null, pendingAt: 0, rosterKey: "" };
 function startDisplay(manual) {
   if (disp.on) return;
   Object.assign(disp, { on: true, manual: !!manual, menu: false, data: null });
@@ -516,6 +534,12 @@ function startDisplay(manual) {
     if (a === "menu") { disp.menu = !disp.menu; drawDisplay(); }
     else if (a === "claim") fetch(`/claim?dev=${DEVICE_ID}`, { cache: "no-store" }).then(() => { sensor.role = "control"; disp.dismissed = true; stopDisplay(); toast("This device is the controller now."); }).catch(() => toast("Couldn't reach the sensor."));
     else if (a === "close") { disp.dismissed = true; stopDisplay(); }
+    else if (a === "picker") { disp.picker = true; drawDisplay(); }
+    else if (a === "pickclose") { disp.picker = false; drawDisplay(); }
+    else if (a === "pick") {
+      const name = b.dataset.name; disp.pending = name; disp.pendingAt = Date.now(); disp.picker = false; drawDisplay();
+      fetch("/pick", { method: "POST", body: new URLSearchParams({ name }), cache: "no-store" }).catch(() => toast("Couldn't reach the sensor."));
+    }
   };
   document.documentElement.classList.add("disp-on");
   try { if (!wakeLock && navigator.wakeLock) navigator.wakeLock.request("screen").then((w) => { wakeLock = w; w.addEventListener("release", () => (wakeLock = null)); }).catch(() => {}); } catch (e) {}
@@ -537,8 +561,14 @@ async function dispLoop() {
 function drawDisplay() {
   const el = $("#disp"); if (!el) return;
   const j = disp.data, E = esc;
+  // a name just tapped shows straight away, until the sensor confirms it
+  if (j && disp.pending) {
+    const cur = j.s === "result" ? j.next : j.who;
+    if (cur === disp.pending || Date.now() - disp.pendingAt > 4000) disp.pending = null; else if (j.s === "result") j.next = disp.pending; else j.who = disp.pending;
+  }
+  const roster = (j && j.roster) || [];
   const dist = (m, vault, dp = 2) => (m == null ? "\u2013" : vault ? ftLabel(m / FT) : `${m.toFixed(dp)}<small>m</small>`);
-  const strip = (cls, label, right = "") => `<div class="d-strip ${cls}"><span>${E(label)}</span><span>${right}</span></div>`;
+  const strip = (cls, label, right = "", act = "") => `<div class="d-strip ${cls}"${act ? ` data-d="${act}"` : ""}><span>${E(label)}</span><span>${right}</span></div>`;
   const evl = j ? [j.evs, j.evl].filter(Boolean).map(E).join(" \u00b7 ") : "";
   let body = "", st = "";
   if (!j) { st = strip("d-dim", "NO SENSOR"); body = `<div class="d-center"><div class="d-xl">JOIN THE WI-FI</div><div class="d-sub">SpeedLidar \u00b7 password vault1234</div></div>`; }
@@ -550,7 +580,7 @@ function drawDisplay() {
     body = `<div class="d-aim ${col}"><div class="d-bars">${bars}</div><div class="d-target ${on >= n ? "on" : ""}"></div><div class="d-bars">${rbars}</div></div>
       <div class="d-sub">${on >= n ? "Locked on: leave the tripod there" : "Turn the tripod slowly \u00b7 aim at athlete\u2019s back"}</div>`;
   } else if (j.s === "armed") {
-    st = strip("d-pink", "ARMED", E(j.who));
+    st = strip("d-pink", "ARMED", E(j.who), roster.length ? "picker" : "");
     body = `<div class="d-fit d-pulse">${innerHeight > innerWidth ? `<div>GO</div><div>WHEN</div>` : `<div>GO WHEN</div>`}<div class="d-pinkt">READY</div></div>`;
   } else if (j.s === "rec") {
     const prog = j.runTarget > 0 ? Math.min(1, j.runDist / j.runTarget) : 0;
@@ -564,7 +594,7 @@ function drawDisplay() {
     st = strip("d-blue", j.strip || "RESULT", E((j.fl || "").split(" \u00b7 ")[0].split(" ")[0]));
     body = `<div class="d-res"><div><div class="d-label">${E(j.head)}</div><div class="d-num d-bluet">${E(j.hv)}<small>${E(j.hu)}</small></div></div>
       <div class="d-cells">${(j.cells || []).map(([k, v, u]) => `<div><div class="d-label">${E(k)}</div><div class="d-cell">${E(v)}<small>${E(u)}</small></div></div>`).join("")}</div></div>
-      ${j.next ? `<div class="d-next"><span>UP NEXT</span><b>${E(j.next)}</b></div>` : ""}`;
+      ${j.next ? `<div class="d-next"${roster.length ? ' data-d="picker"' : ""}><span>UP NEXT</span><b>${E(j.next)}</b>${roster.length ? "<i>change</i>" : ""}</div>` : ""}`;
   } else if (j.s === "nolidar") {
     st = strip("d-amber", "NO LIDAR");
     body = `<div class="d-center"><div class="d-xl d-ambert">NO SIGNAL</div><div class="d-sub">The LiDAR isn\u2019t sending anything. Check its cable and the power bank.</div></div>`;
@@ -579,9 +609,26 @@ function drawDisplay() {
         ${holding ? `<div class="d-hold"><span>HOLD STILL</span><div class="d-bar"><b style="width:${(j.hold * 100).toFixed(0)}%"></b></div></div>` : `<div class="d-cue">Stand at the start to arm</div>`}`
       : `<div class="d-center"><div class="d-xl">WAITING</div><div class="d-sub">Set up the next run on the controller.</div></div>`;
   }
-  el.innerHTML = `${st}<div class="d-body s-${j ? (j.s === "boot" || j.s === "wifi" ? "ready" : j.s) : "none"}">${body}</div>
+  // The roster: always beside UP NEXT; over the armed and result screens when you tap the name.
+  // It lives in its own element (only rebuilt when it changes) so scrolling it isn't interrupted.
+  const sName = j ? (j.s === "boot" || j.s === "wifi" ? "ready" : j.s) : "none";
+  const side = !!(j && roster.length && sName === "ready" && j.armed && j.who);
+  const pop = !!(j && roster.length && disp.picker && (sName === "armed" || sName === "result" || sName === "ready"));
+  let main = el.querySelector(".d-main"), rs = el.querySelector(".d-roster");
+  if (!main) { el.innerHTML = `<div class="d-main"></div><div class="d-roster" hidden></div>`; main = el.querySelector(".d-main"); rs = el.querySelector(".d-roster"); }
+  main.innerHTML = `${st}<div class="d-body s-${sName}${side ? " d-side" : ""}">${body}</div>
     <button class="d-menu" data-d="menu" aria-label="Display options">\u2022\u2022\u2022</button>
-    ${disp.menu ? `<div class="d-pop"><button data-d="claim">Use this device as the controller</button><button data-d="close">Close the display</button></div>` : ""}`;
+    ${disp.menu ? `<div class="d-pop"><button data-d="claim">Use this device as the controller</button><button data-d="close">Close the display</button></div>` : ""}
+    ${pop && !side ? `<div class="d-shade" data-d="pickclose"></div>` : ""}`;
+  const cur = j ? (sName === "result" ? j.next || j.who : j.who) : "";
+  const mode = side ? "side" : pop ? "pop" : "", key = `${mode}|${cur}|${roster.join("|")}`;
+  if (key !== disp.rosterKey) {
+    disp.rosterKey = key;
+    rs.hidden = !mode; rs.className = `d-roster ${mode}`;
+    rs.innerHTML = mode ? `<div class="d-label">${mode === "pop" ? (sName === "result" ? "WHO\u2019S UP NEXT?" : "WHO\u2019S UP?") : "CHANGE"}</div>` +
+      roster.map((n) => `<button data-d="pick" data-name="${E(n)}" class="${n === cur ? "on" : ""}">${E(n)}</button>`).join("") : "";
+  }
+  if (mode) { const sh = main.querySelector(".d-strip"); rs.style.top = `${sh ? sh.offsetHeight : 0}px`; }
   // GO WHEN READY: as big as the screen allows (2 lines across, 3 when the screen stands up)
   const fit = el.querySelector(".d-fit");
   if (fit) {
