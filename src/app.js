@@ -184,6 +184,7 @@ async function poll() {
     sensor.arm = j.arm != null ? j.arm : null; sensor.cfg = j.cfg || ""; sensor.phones = j.phones || 0; sensor.fw = j.fw || "";
     sensor.role = j.role || "control";
     if (j.pick != null) { sensor.pick = j.pick; sensor.pickName = j.pickName || ""; takePick(); }
+    if (j.order != null) { sensor.order = j.order; takeOrder(); }
     // the first device on the sensor is the controller; any other one turns into the big display
     if (sensor.role === "display" && !disp.on && !disp.dismissed) startDisplay();
     else if (sensor.role === "control" && disp.on && !disp.manual) stopDisplay();
@@ -382,6 +383,7 @@ async function arm(now) {
     const seen = new Set(), names = [];
     for (const id of [...(cap.queue || []), ...athletes.map((x) => x.id)]) { const x = athleteById(id); if (x && x.name && !seen.has(x.id)) { seen.add(x.id); names.push(x.name.slice(0, 23)); } }
     body.set("roster", names.slice(0, 40).join("\n"));
+    body.set("lineup", Math.min(40, new Set((cap.queue || []).filter((id) => athleteById(id))).size));
     try { const j = await (await fetch("/arm", { method: "POST", body, cache: "no-store" })).json(); if (j && j.arm != null) cap.armId = j.arm; }
     catch (e) { cap.error = "Couldn't reach the sensor. Join its Wi-Fi (SpeedLidar) and try again."; }
   }
@@ -404,6 +406,20 @@ function takePick() {
     toast(`${a.name} is up (picked on the display)`);
     arm(sensor.state === 2);   // already standing ready: stay armed for the new athlete
   } else render();
+}
+// the display dragged the roster into a new order: that's today's lineup now (names above the line)
+async function takeOrder() {
+  if (sensor.role !== "control" || disp.on) return;
+  if (cap.orderSeen == null) { cap.orderSeen = sensor.order; return; }
+  if (sensor.order === cap.orderSeen) return;
+  cap.orderSeen = sensor.order;
+  let j; try { j = await (await fetch("/screen", { cache: "no-store" })).json(); } catch (e) { return; }
+  if (!j || !Array.isArray(j.roster) || !(j.lineup > 0)) return;
+  const byName = (n) => athletes.find((x) => x.name.trim().slice(0, 23).toLowerCase() === String(n).trim().toLowerCase());
+  const q = j.roster.slice(0, j.lineup).map(byName).filter(Boolean).map((a) => a.id);
+  if (!q.length || q.join() === cap.queue.join()) return;
+  cap.queue = q; settings.lastQueue = q.slice(); saveSettings();
+  toast("Lineup changed on the display"); render();
 }
 function onLive() {
   if (view !== "new" || cap.sim) return;
@@ -523,7 +539,7 @@ function showOnSensor(run, armId) {
 }
 // ---------------- big display (a second device, e.g. an iPad on the tripod facing the athletes) ----------------
 // Shows what the sensor's own screen shows, big: who's up next, the live run, the result.
-const disp = { on: false, manual: false, dismissed: false, busy: false, data: null, menu: false, picker: false, pending: null, pendingAt: 0, rosterKey: "" };
+const disp = { on: false, manual: false, dismissed: false, busy: false, data: null, menu: false, picker: false, pending: null, pendingAt: 0, rosterKey: "", dragging: false, order: null };
 function startDisplay(manual) {
   if (disp.on) return;
   Object.assign(disp, { on: true, manual: !!manual, menu: false, data: null });
@@ -621,12 +637,20 @@ function drawDisplay() {
     ${disp.menu ? `<div class="d-pop"><button data-d="claim">Use this device as the controller</button><button data-d="close">Close the display</button></div>` : ""}
     ${pop && !side ? `<div class="d-shade" data-d="pickclose"></div>` : ""}`;
   const cur = j ? (sName === "result" ? j.next || j.who : j.who) : "";
-  const mode = side ? "side" : pop ? "pop" : "", key = `${mode}|${cur}|${roster.join("|")}`;
-  if (key !== disp.rosterKey) {
+  // a just-dragged order shows straight away, until the sensor has it
+  let names = roster, lineup = Math.min((j && j.lineup) || 0, roster.length);
+  if (disp.order) { if ((j && j.order) > disp.order.after || Date.now() - disp.order.at > 4000) disp.order = null; else ({ names, lineup } = disp.order); }
+  const mode = side ? "side" : pop ? "pop" : "", key = `${mode}|${cur}|${lineup}|${names.join("|")}`;
+  if (key !== disp.rosterKey && !disp.dragging) {
     disp.rosterKey = key;
     rs.hidden = !mode; rs.className = `d-roster ${mode}`;
-    rs.innerHTML = mode ? `<div class="d-label">${mode === "pop" ? (sName === "result" ? "WHO\u2019S UP NEXT?" : "WHO\u2019S UP?") : "CHANGE"}</div>` +
-      roster.map((n) => `<button data-d="pick" data-name="${E(n)}" class="${n === cur ? "on" : ""}">${E(n)}</button>`).join("") : "";
+    rs.innerHTML = mode ? `<div class="d-label">${mode === "pop" ? (sName === "result" ? "WHO\u2019S UP NEXT?" : "WHO\u2019S UP?") : "TAP TO PICK \u00b7 DRAG \u2261 TO MOVE"}</div>` +
+      names.map((n, i) => (i === lineup && lineup > 0 ? `<div class="d-div">NOT IN TODAY\u2019S LINEUP</div>` : "") +
+        `<button data-d="pick" data-name="${E(n)}" class="${n === cur ? "on" : ""}"><span class="nm">${E(n)}</span><span class="d-grip" data-d="grip" aria-label="Drag to move">\u2261</span></button>`).join("") : "";
+    if (!rs.dataset.drag) { rs.dataset.drag = "1"; rosterDrag(rs, (order, lu) => {
+      disp.order = { names: order, lineup: lu, at: Date.now(), after: (disp.data && disp.data.order) || 0 }; disp.rosterKey = ""; drawDisplay();
+      fetch("/order", { method: "POST", body: new URLSearchParams({ roster: order.join("\n"), lineup: lu }), cache: "no-store" }).catch(() => toast("Couldn't reach the sensor."));
+    }); }
   }
   if (mode) { const sh = main.querySelector(".d-strip"); rs.style.top = `${sh ? sh.offsetHeight : 0}px`; }
   // GO WHEN READY: as big as the screen allows (2 lines across, 3 when the screen stands up)
@@ -637,6 +661,42 @@ function drawDisplay() {
     const k = Math.min(cw / fit.scrollWidth, ch / fit.scrollHeight);
     fit.style.fontSize = `${Math.floor(100 * k * 0.97)}px`;
   }
+}
+// drag a name by its \u2261 handle to move it up or down the roster (and across the lineup line)
+function rosterDrag(rs, onDrop) {
+  let d = null;
+  const items = () => [...rs.children].filter((c) => c.tagName === "BUTTON" || c.classList.contains("d-div"));
+  rs.addEventListener("pointerdown", (e) => {
+    const g = e.target.closest(".d-grip"); if (!g) return;
+    e.preventDefault();
+    const it = g.closest("button"); d = { it, y: e.clientY, moved: false, gap: parseFloat(getComputedStyle(rs).rowGap) || 0 };
+    disp.dragging = true; it.classList.add("drag");
+    try { g.setPointerCapture(e.pointerId); } catch (x) {}
+  });
+  rs.addEventListener("pointermove", (e) => {
+    if (!d) return;
+    // near the top or bottom edge: scroll the list along
+    const box = rs.getBoundingClientRect(), edge = 50;
+    const toward = e.clientY - d.y;
+    const sc = e.clientY < box.top + edge && toward < -20 ? -10 : e.clientY > box.bottom - edge && toward > 20 ? 10 : 0;
+    if (sc) { const before = rs.scrollTop; rs.scrollTop += sc; d.y -= rs.scrollTop - before; }
+    let dy = e.clientY - d.y; if (Math.abs(dy) > 4) d.moved = true;
+    const list = items(), i = list.indexOf(d.it), r = d.it.getBoundingClientRect(), mid = r.top + r.height / 2 - (parseFloat(d.it.style.transform.slice(11)) || 0) + dy;
+    const next = list[i + 1], prev = list[i - 1];
+    if (next) { const nr = next.getBoundingClientRect(); if (mid > nr.top + nr.height / 2) { rs.insertBefore(next, d.it); d.y += nr.height + d.gap; } }
+    if (prev) { const pr = prev.getBoundingClientRect(); if (mid < pr.top + pr.height / 2) { rs.insertBefore(d.it, prev); d.y -= pr.height + d.gap; } }
+    dy = e.clientY - d.y; d.it.style.transform = `translateY(${dy}px)`;
+  });
+  const end = () => {
+    if (!d) return;
+    const { it, moved } = d; d = null; disp.dragging = false;
+    it.style.transform = ""; it.classList.remove("drag");
+    if (!moved) return;
+    const list = items(), order = list.filter((c) => c.tagName === "BUTTON").map((c) => c.dataset.name);
+    const div = list.findIndex((c) => c.classList.contains("d-div"));
+    onDrop(order, div >= 0 ? div : order.length);
+  };
+  rs.addEventListener("pointerup", end); rs.addEventListener("pointercancel", end);
 }
 function devicesCardHTML() {
   if (WEB_COPY) return "";

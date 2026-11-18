@@ -339,11 +339,18 @@ html.disp-on,html.disp-on body{overflow:hidden}
 .s-ready.d-side .d-ev,.s-ready.d-side .d-cue,.s-ready.d-side .d-hold{font-size:min(7vh,4vw)}
 .d-roster{box-sizing:border-box;position:absolute;right:0;bottom:0;width:34vw;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;display:flex;flex-direction:column;gap:1.2vh;padding:2.4vh 2.4vw 4vh;border-left:.3vh solid #2b2546;background:#0b0915}
 .d-roster.pop{width:40vw;border-left:0;background:#171329;box-shadow:-2vw 0 6vw rgba(0,0,0,.5);z-index:3}
-.d-roster .d-label{margin-bottom:.6vh}
+.d-roster .d-label{margin-bottom:.6vh;font-size:min(3.6vh,2.3vw);line-height:1.2}
 .d-roster button{font:inherit;font-weight:800;font-size:min(6vh,3.2vw);line-height:1.05;text-align:left;color:#f4f1ff;background:#171329;border:.3vh solid #2b2546;border-radius:1.4vh;padding:1.6vh 1.6vw;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}
 .d-roster.pop button{background:#221d3a}
 .d-roster button.on{background:#2bd47d;border-color:#2bd47d;color:#0b0915}
-.d-roster button:active{transform:scale(.98)}
+.d-roster button{display:flex;align-items:center;gap:1vw;padding-right:.6vw}
+.d-roster .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.d-grip{flex:0 0 auto;color:#6b6488;font-size:1.1em;line-height:1;padding:.6vh 1vw;touch-action:none;cursor:grab}
+.d-roster button.on .d-grip{color:#0b0915}
+.d-roster button.drag{position:relative;z-index:6;box-shadow:0 1.4vh 3vh rgba(0,0,0,.6);border-color:#8b5cf6;transition:none}
+.d-div{font-size:min(3.4vh,2.2vw);color:#9c95b8;letter-spacing:.06em;border-top:.3vh dashed #2b2546;padding-top:1.2vh;margin-top:.6vh}
+.d-roster button:active:not(.drag){filter:brightness(1.15)}
+.d-main:has(.d-side) .d-menu,.d-main:has(.d-side) .d-pop{right:35vw}
 .d-shade{position:absolute;inset:0;background:rgba(11,9,21,.55);z-index:2}
 #disp .d-menu{z-index:4}#disp .d-pop{z-index:5}
 .d-pulse{animation:dpulse 1.6s ease-in-out infinite}
@@ -366,8 +373,8 @@ html.disp-on,html.disp-on body{overflow:hidden}
 .d-target::after{content:"";position:absolute;inset:30%;border-radius:50%;background:#2b2546}
 .d-aim.d-green .d-target.on{border-color:#2bd47d}.d-aim.d-green .d-target.on::after{background:#2bd47d}
 .s-aim .d-sub{text-align:left}
-.d-menu{position:absolute;right:2vw;bottom:2vh;background:none;border:0;color:#2b2546;font-size:24px;padding:10px;cursor:pointer}
-.d-pop{position:absolute;right:2vw;bottom:calc(2vh + 50px);display:flex;flex-direction:column;gap:8px;background:#171329;border:1px solid #2b2546;border-radius:14px;padding:10px}
+.d-menu{position:absolute;right:1vw;bottom:1vh;background:none;border:0;color:#2b2546;font-size:24px;padding:10px;cursor:pointer}
+.d-pop{position:absolute;right:1vw;bottom:calc(1vh + 50px);display:flex;flex-direction:column;gap:8px;background:#171329;border:1px solid #2b2546;border-radius:14px;padding:10px}
 .d-pop button{font:600 16px var(--ui);color:#f4f1ff;background:#2b2546;border:0;border-radius:10px;padding:12px 16px;cursor:pointer;text-align:left}
 /* iPad standing up: stack and let the name run over two lines */
 @media (orientation:portrait){
