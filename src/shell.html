@@ -51,7 +51,7 @@ html.ios-app{min-height:calc(100% + env(safe-area-inset-top,0px))}
 @media (min-width:720px){.top{padding-left:max(16px,calc((100% - 680px) / 2 + 16px));padding-right:max(16px,calc((100% - 680px) / 2 + 16px))}}
 .brand{font-family:var(--display);font-weight:800;font-size:clamp(15px,4.2vw,23px);letter-spacing:.4px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .top .pill{flex:none}
-.brand .hmark{width:1.8em;height:1em;vertical-align:-.18em;margin-right:.35em}
+.brand .hmark{width:2em;height:1.02em;vertical-align:-.16em;margin-right:.4em}
 .brand b{background:linear-gradient(90deg,var(--pink),var(--purple),var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
 .pill{font-size:12px;font-weight:600;padding:5px 10px;border-radius:999px;background:var(--card2);color:var(--muted);white-space:nowrap}
 .pill.ok{color:var(--good)}.pill.off{color:var(--bad)}
@@ -198,7 +198,7 @@ h1{font-size:34px;letter-spacing:.2px}
 .res .v{font-size:36px}.res.hero .v{font-size:60px;line-height:1}.res.hero .v{color:var(--blue)}
 .qt b{font-size:34px;line-height:1.05}
 .top{background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
-.brand{font-size:clamp(17px,5vw,24px);text-transform:uppercase;letter-spacing:.3px}
+.brand{font-size:clamp(17px,5vw,24px);letter-spacing:.3px}
 #conn{display:inline-flex;align-items:center;gap:6px;font-family:var(--display);font-weight:800;font-size:14px;letter-spacing:.5px;text-transform:uppercase;padding:6px 11px}
 #conn:before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
 #conn.ok{background:rgba(43,212,125,.14)}#conn.off{background:var(--card2)}#conn.warn{color:var(--warn);background:rgba(255,176,32,.14)}
@@ -499,7 +499,7 @@ html.disp-on,html.disp-on body{overflow:hidden}
 </head>
 <body>
 <header class="top">
-  <div class="brand"><svg class="hmark" viewBox="11 32 79 44" aria-hidden="true"><rect x="13" y="34" width="54" height="8" rx="3" fill="#7444e8"/><rect x="13" y="44" width="54" height="22" rx="4" fill="currentColor"/><path d="M32 68 H48 L51 74 H29 Z" fill="#0f8fd6"/><g stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="M74 47 H88"/><path d="M74 55 H84"/><path d="M74 63 H88"/></g></svg>PAYTON'S <b>LiDAR</b> SENSOR</div>
+  <div class="brand"><svg class="hmark" viewBox="0 0 80 41" aria-hidden="true"><rect x="0" y="0" width="54" height="8" rx="3" fill="#8b5cf6"/><rect x="0" y="10" width="54" height="22" rx="4" fill="#2a2636"/><rect x="19" y="34" width="16" height="6" rx="1" fill="#22b8ff"/><g stroke="#cfc8e6" stroke-width="8" stroke-linecap="round"><path d="M61 13H75"/><path d="M61 21H71"/><path d="M61 29H75"/></g></svg>PAYTON'S <b>LiDAR</b> SENSOR</div>
   <span id="conn" class="pill off">No sensor</span>
 </header>
 <main id="app"></main>
