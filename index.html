@@ -43,6 +43,10 @@ button,input,select{font:inherit;color:inherit}
 /* home-screen app on iPhone/iPad: the status bar is drawn over the page, and iPads often report no safe area for it,
    so always leave at least the status bar's height above the header */
 html.ios-app .top{padding-top:calc(12px + max(env(safe-area-inset-top,0px),24px))}
+/* Home Screen app on iPhone: with the see-through status bar, a page shorter than the screen leaves the bottom
+   tab bar floating a status bar's height too high (an iOS quirk). Making the page at least that much taller keeps
+   it pinned to the bottom on every tab, like on the long ones. */
+html.ios-app{min-height:calc(100% + env(safe-area-inset-top,0px))}
 /* tablets and wider: line the header up with the content column */
 @media (min-width:720px){.top{padding-left:max(16px,calc((100% - 680px) / 2 + 16px));padding-right:max(16px,calc((100% - 680px) / 2 + 16px))}}
 .brand{font-family:var(--display);font-weight:800;font-size:clamp(15px,4.2vw,23px);letter-spacing:.4px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
