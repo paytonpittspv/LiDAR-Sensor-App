@@ -14,10 +14,13 @@ ROOT = os.path.dirname(HERE)
 read = lambda name: open(os.path.join(HERE, name), encoding="utf-8").read()
 font = lambda name: base64.b64encode(open(os.path.join(HERE, "fonts", name), "rb").read()).decode()
 
-# report font (Inter, SIL Open Font License), embedded because the sensor's Wi-Fi has no internet
+# fonts, embedded because the sensor's Wi-Fi has no internet (both SIL Open Font License):
+#   Inter for the printed reports; Barlow Condensed (Bold, ExtraBold), the sensor screen's font, for headings and numbers
 FONTS = ('@font-face{font-family:"Report Sans";src:url(data:font/woff;base64,%s) format("woff");font-weight:100 550;font-style:normal}'
          '@font-face{font-family:"Report Sans";src:url(data:font/woff;base64,%s) format("woff");font-weight:551 900;font-style:normal}'
-         ) % (font("Inter-Regular.woff"), font("Inter-SemiBold.woff"))
+         '@font-face{font-family:"Barlow Condensed";src:url(data:font/woff;base64,%s) format("woff");font-weight:600 749;font-style:normal}'
+         '@font-face{font-family:"Barlow Condensed";src:url(data:font/woff;base64,%s) format("woff");font-weight:750 900;font-style:normal}'
+         ) % (font("Inter-Regular.woff"), font("Inter-SemiBold.woff"), font("BarlowCondensed-Bold.woff"), font("BarlowCondensed-ExtraBold.woff"))
 
 app = read("app.js").replace("/*__REPORT__*/", read("report.js"))
 html = read("shell.html").replace("/*__FONTS__*/", FONTS).replace("/*__ENGINE__*/", read("engine.js")).replace("/*__APP__*/", app)

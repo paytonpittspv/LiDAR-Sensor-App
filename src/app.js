@@ -169,7 +169,7 @@ function changeTag(R) {
 
 // ---------------- sensor ----------------
 // sensor states (from the firmware): 0 idle · 1 waiting for an athlete to stand still · 2 armed · 3 running · 4 done
-const sensor = { connected: false, d: null, s: 0, rate: 0, rec: false, moved: false, misses: 0, state: 0, sets: 0, go: 0, inZone: false, arm: null, cfg: "", phones: 0, fw: "", role: null };
+const sensor = { connected: false, d: null, s: 0, rate: 0, rec: false, moved: false, misses: 0, state: 0, sets: 0, go: 0, inZone: false, hold: 0, arm: null, cfg: "", phones: 0, fw: "", role: null };
 let pollBusy = false;
 async function poll() {
   if (pollBusy) return; pollBusy = true;
@@ -180,7 +180,7 @@ async function poll() {
     if (!sensor.connected) setTimeout(certSync, 400);
     sensor.connected = true; sensor.misses = 0;
     sensor.d = j.d > 10 && j.d < j.max ? j.d / 100 : null; sensor.s = j.s; sensor.rate = j.rate; sensor.rec = j.rec; sensor.moved = j.moved;
-    sensor.state = j.state || 0; sensor.sets = j.sets || 0; sensor.go = j.go || 0; sensor.inZone = !!j.in;
+    sensor.state = j.state || 0; sensor.sets = j.sets || 0; sensor.go = j.go || 0; sensor.inZone = !!j.in; sensor.hold = j.hold || 0;
     sensor.arm = j.arm != null ? j.arm : null; sensor.cfg = j.cfg || ""; sensor.phones = j.phones || 0; sensor.fw = j.fw || "";
     sensor.role = j.role || "control";
     if (j.pick != null) { sensor.pick = j.pick; sensor.pickName = j.pickName || ""; takePick(); }
@@ -192,7 +192,10 @@ async function poll() {
     onLive();
   } catch (e) { if (++sensor.misses > 3) { sensor.connected = false; sensor.d = null; } }
   pollBusy = false;
-  const p = $("#conn"); p.className = "pill " + (sensor.connected ? "ok" : "off"); p.textContent = sensor.connected ? (sensor.d != null ? `${sensor.d.toFixed(2)} m` : "Connected") + (sensor.phones > 1 ? ` · ${sensor.phones} devices` : "") : "No sensor";
+  const p = $("#conn"), noLidar = sensor.connected && !sensor.rate;
+  p.className = "pill " + (!sensor.connected ? "off" : noLidar ? "warn" : "ok");
+  p.textContent = !sensor.connected ? "No sensor" : noLidar ? "No LiDAR" : sensor.phones > 1 ? `${sensor.phones} devices` : "Connected";
+  const cue = $("#stcue"); if (cue) cue.innerHTML = cueHTML();
   document.querySelectorAll("[data-live]").forEach((el) => (el.textContent = sensor.d != null ? sensor.d.toFixed(2) : "—"));
   const z = $("#zone"); if (z) { z.classList.toggle("on", sensor.inZone); z.querySelector("span").textContent = sensor.inZone ? "Someone is in the zone: stand still…" : "Nobody in the zone yet"; }
 }
@@ -460,7 +463,7 @@ function liveSpan() { return cap.mode === "sprint" ? cap.target : Math.round(SET
 function liveDraw() {
   const L = cap.live, el = $("#liveBox"); if (!L || !el) return;
   const x = L.pts.length ? L.pts[L.pts.length - 1][0] : 0;
-  $("#liveD").textContent = x.toFixed(1); $("#liveV").textContent = L.v.toFixed(2); $("#liveTop").textContent = L.top ? `top ${L.top.toFixed(2)} m/s` : "";
+  $("#liveD").textContent = x.toFixed(1); $("#liveV").textContent = L.v.toFixed(2); $("#liveTop").textContent = L.top ? `TOP ${L.top.toFixed(2)}` : "";
   const W = 340, H = 150, pl = 30, pr = 8, pt = 8, pb = 22, span = Math.max(5, liveSpan()), ym = 12;
   const X = (v) => pl + (v / span) * (W - pl - pr), Y = (v) => pt + (1 - Math.min(v, ym) / ym) * (H - pt - pb);
   let d = ""; for (const [a, b] of L.pts) d += (d ? "L" : "M") + X(Math.min(a, span)).toFixed(1) + " " + Y(b).toFixed(1);
@@ -470,15 +473,13 @@ function liveDraw() {
 function liveCardHTML() {
   const W = 340, H = 150, pl = 30, pr = 8, pt = 8, pb = 22, span = Math.max(5, liveSpan()), ym = 12;
   const X = (v) => pl + (v / span) * (W - pl - pr), Y = (v) => pt + (1 - v / ym) * (H - pt - pb);
-  let grid = ""; for (const v of [3, 6, 9, 12]) grid += `<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${pl - 5}" y="${Y(v) + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${v}</text>`;
-  for (const t of niceTicks(0, span, 6)) grid += `<text x="${X(t)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="var(--muted)">${t}</text>`;
-  return `<div class="card tint" id="liveBox"><div class="between"><div class="upname" style="font-size:22px">${esc(athleteById(cap.athleteId).name)}</div><span class="pill ok">● LIVE</span></div>
-    <div class="grid2" style="margin-top:6px"><div><div class="label">Distance</div><div class="livebig"><span id="liveD">0.0</span><small> m</small></div></div>
-      <div><div class="label">Speed</div><div class="livebig"><span id="liveV">0.00</span><small> m/s</small></div><div class="small muted" id="liveTop"></div></div></div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;margin-top:8px" aria-label="Live speed along the run"><defs><linearGradient id="lvg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" style="stop-color:var(--pink);stop-opacity:.35"/><stop offset="1" style="stop-color:var(--pink);stop-opacity:0"/></linearGradient></defs>
+  let grid = ""; for (const v of [3, 6, 9, 12]) grid += `<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${pl - 5}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}</text>`;
+  for (const t of niceTicks(0, span, 6)) grid += `<text x="${X(t)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--muted)">${t}</text>`;
+  return `<div id="liveBox" style="display:contents"><div class="st-label">Speed</div><div class="st-big"><span id="liveV">0.00</span><small>m/s</small></div>
+    <div class="st-row"><div><div class="st-label">Distance</div><div class="st-mid"><span id="liveD">0.0</span><small>m</small></div></div><div class="st-ev" id="liveTop" style="color:var(--blue)"></div></div>
+    <svg class="live-svg" viewBox="0 0 ${W} ${H}" aria-label="Live speed along the run"><defs><linearGradient id="lvg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" style="stop-color:var(--purple);stop-opacity:.45"/><stop offset="1" style="stop-color:var(--purple);stop-opacity:0"/></linearGradient></defs>
       ${grid}<line x1="${pl}" x2="${W - pr}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--muted)" stroke-opacity=".5"/>
-      <path id="liveFill" d="M0 0" fill="url(#lvg)"/><path id="livePath" d="M0 0" fill="none" stroke="var(--pink)" stroke-width="2.6" stroke-linejoin="round"/></svg>
-    <div class="small muted" style="text-align:center">Speed (m/s) · distance from the start (m)</div></div>`;
+      <path id="liveFill" d="M0 0" fill="url(#lvg)"/><path id="livePath" d="M0 0" fill="none" stroke="var(--pink)" stroke-width="3" stroke-linejoin="round"/></svg></div>`;
 }
 
 async function download() {
@@ -663,14 +664,14 @@ function drawDisplay() {
   }
 }
 // drag a name by its \u2261 handle to move it up or down the roster (and across the lineup line)
-function rosterDrag(rs, onDrop) {
+function rosterDrag(rs, onDrop, st = disp, attr = "name") {
   let d = null;
   const items = () => [...rs.children].filter((c) => c.tagName === "BUTTON" || c.classList.contains("d-div"));
   rs.addEventListener("pointerdown", (e) => {
     const g = e.target.closest(".d-grip"); if (!g) return;
     e.preventDefault();
     const it = g.closest("button"); d = { it, y: e.clientY, moved: false, gap: parseFloat(getComputedStyle(rs).rowGap) || 0 };
-    disp.dragging = true; it.classList.add("drag");
+    st.dragging = true; it.classList.add("drag");
     try { g.setPointerCapture(e.pointerId); } catch (x) {}
   });
   rs.addEventListener("pointermove", (e) => {
@@ -689,10 +690,10 @@ function rosterDrag(rs, onDrop) {
   });
   const end = () => {
     if (!d) return;
-    const { it, moved } = d; d = null; disp.dragging = false;
+    const { it, moved } = d; d = null; st.dragging = false;
     it.style.transform = ""; it.classList.remove("drag");
     if (!moved) return;
-    const list = items(), order = list.filter((c) => c.tagName === "BUTTON").map((c) => c.dataset.name);
+    const list = items(), order = list.filter((c) => c.tagName === "BUTTON").map((c) => c.dataset[attr]);
     const div = list.findIndex((c) => c.classList.contains("d-div"));
     onDrop(order, div >= 0 ? div : order.length);
   };
@@ -1159,19 +1160,10 @@ function go(v, arg) {
 function voiceCard() {
   return `<div class="card between" style="margin-top:6px"><div><b>Voice</b><div class="small muted">Says "${cap.queue.length > 1 ? "Name, ready" : "Ready"}" after the chime and reads every result aloud. Off: chime only.</div></div><label class="switch"><input type="checkbox" id="voiceSw" ${settings.voice ? "checked" : ""}><span></span></label></div>`;
 }
-function athletePicker() {
-  if (!athletes.length) return `<div class="card"><div class="muted small" style="margin-bottom:8px">Add who's running first.</div><button class="btn" data-act="ath-new">Add athlete</button></div>`;
-  return `<div class="chips">${athletes.map((a) => { const i = cap.queue.indexOf(a.id); return `<button class="chip" data-act="pick-ath" data-id="${a.id}" aria-pressed="${i >= 0}">${i >= 0 ? `<span class="qn">${i + 1}</span>` : ""}${esc(a.name)}</button>`; }).join("")}<button class="chip" data-act="ath-new">+ Add</button></div>
-    <div class="small muted" style="margin-top:6px">${cap.queue.length > 1 ? `They take turns in this order: after each run it gets ready for the next athlete.` : "Pick one or more. With several, they take turns and it gets ready for the next one after each run."}</div>`;
-}
 function sessionBar() {
   if (!cap.session) return "";
   const n = cap.session.ids.length, mins = Math.max(0, Math.round((Date.now() - cap.session.start) / 60000));
   return `<div class="sessbar"><div><b>Session</b><span>${n} run${n === 1 ? "" : "s"} saved · ${mins} min</span></div><button class="btn sm" data-act="cap-end">End session</button></div>`;
-}
-function upNext() {
-  if (cap.queue.length < 2) return "";
-  return `<div class="upnext"><span class="small muted">Up now · tap to change</span><div class="chips">${cap.queue.map((id, i) => `<button class="chip" data-act="cap-up" data-id="${id}" aria-pressed="${id === cap.athleteId}"><span class="qn">${i + 1}</span>${esc(athleteById(id).name)}</button>`).join("")}</div></div>`;
 }
 function summaryHTML() {
   const s = cap.session, list = s ? runs.filter((r) => s.ids.includes(r.id)).sort((x, y) => x.ts - y.ts) : [];
@@ -1238,10 +1230,13 @@ function homeHTML() {
   if (prs.length && now - prs[0].r.ts < 3 * 864e5) line = `New best: ${esc(athleteById(prs[0].r.athleteId).name)}, ${prs[0].name.toLowerCase()} ${prs[0].text}.`;
   else if (today.length) line = `${today.length} run${today.length > 1 ? "s" : ""} recorded today. ${sub}`;
   let h = `<div class="hello"><div class="hi">${hi}</div><div class="muted">${line}</div></div>`;
-  h += `<div class="card tint"><div class="between"><div><div class="label">Sensor</div>
-      <div class="small" style="margin-top:2px"><span class="dot" style="background:${sensor.connected ? "var(--good)" : "var(--muted)"}"></span>${sensor.connected ? `Connected · <span data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</span> m` : "Not connected"}</div></div>
-      <div class="small muted" style="text-align:right;max-width:55%">${sensor.connected ? `${sensor.rate} readings/s` : (WEB_COPY ? `This copy can't reach the sensor. To record, join the SpeedLidar Wi-Fi and open ${SECURE_HOST} (or 192.168.4.1). New run here is a simulated practice run.` : "Join the SpeedLidar Wi-Fi to record.")}</div></div>
-    <button class="btn big primary" style="margin-top:12px" data-go="new">New run</button></div>`;
+  // the sensor, as a strip in the screen's colours: green connected, amber no LiDAR signal, dim not connected
+  const noLidar = sensor.connected && !sensor.rate;
+  const hs = !sensor.connected ? ["d-dim", "No sensor", ""] : noLidar ? ["d-amber", "No LiDAR signal", ""] : ["d-green", "Sensor ready", sensor.phones > 1 ? `${sensor.phones} devices` : ""];
+  h += `<div class="card home-sensor"><div class="st-strip ${hs[0]}"><span>${hs[1]}</span><span>${hs[2]}</span></div><div class="hs-body">
+      ${sensor.connected && !noLidar ? `<div class="between" style="align-items:flex-end"><div><div class="label">Distance</div><div class="hs-d"><span data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</span><small>m</small></div></div><div class="small muted" style="text-align:right">${sensor.rate} readings/s</div></div>`
+        : `<div class="small muted">${noLidar ? "Connected, but the LiDAR isn't sending anything. Check its cable and the power bank." : WEB_COPY ? `This copy can't reach the sensor. To record, join the SpeedLidar Wi-Fi and open ${SECURE_HOST} (or 192.168.4.1). New run here is a simulated practice run.` : "Join the SpeedLidar Wi-Fi to record."}</div>`}
+    <button class="btn big primary" style="margin-top:14px" data-go="new">New run</button></div></div>`;
   h += sendCardHTML(true) + (WEB_COPY ? getCardHTML() : "");
   if (!athletes.length) return h + `<div class="card"><b>Start here</b><div class="small muted" style="margin:4px 0 10px">Add the athletes you'll be timing. Body weight is optional and only used for power.</div><button class="btn" data-act="ath-new">Add an athlete</button></div>`;
   // quick numbers
@@ -1307,12 +1302,12 @@ function wizardHTML() {
       <button class="btn big primary" style="margin-top:16px" data-act="wiz-next">Next</button>
       <details class="howto-d"><summary>How to set up the tripod</summary>${setupGuide(cap.setup)}</details>`;
   } else {
-    const what = vault ? SETUPS[cap.setup].name : `${cap.target} m sprint`;
-    h += athletePicker();
-    h += `<div class="card wiz-sum"><div><div class="small muted">Event</div><b>${what}</b></div><button class="btn sm ghost" data-act="wiz-edit">Change</button></div>`;
-    const q = cap.queue;
-    h += `<button class="btn big primary" style="margin-top:6px" data-act="cap-ready" ${q.length ? "" : "disabled"}>${!q.length ? "Pick who's running" : q.length === 1 ? `Get ready · ${esc(athleteById(q[0]).name)}` : `Get ready · ${q.length} athletes taking turns`}</button>
-      <div class="small muted" style="text-align:center;margin-top:10px">Hands Free Mode is <b>${settings.solo ? "on" : "off"}</b> · chime, voice and Hands Free are in <a href="#" data-go="settings">Settings</a></div>`;
+    const what = vault ? SETUPS[cap.setup].name : `${cap.target} m sprint`, q = cap.queue.filter((id) => athletes.some((a) => a.id === id));
+    h += `<div class="ev-sum"><div><div class="label">Event</div><b>${esc(what)}</b></div><button class="btn sm" data-act="wiz-edit">Change</button></div>`;
+    if (!athletes.length) h += `<div class="card"><div class="muted small" style="margin-bottom:8px">Add who's running first.</div><button class="btn" data-act="ath-new">Add athlete</button></div>`;
+    else h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap to add or take off · drag ≡ to change the order</span></div>${lineupHTML("setup")}<button class="lu-add" data-act="ath-new">+ Add athlete</button>`;
+    h += `<div class="small muted" style="text-align:center;margin-top:14px">Hands Free Mode is <b>${settings.solo ? "on" : "off"}</b> · chime, voice and Hands Free are in <a href="#" data-go="settings">Settings</a></div>`;
+    h += `<div class="dock"><button class="btn primary" data-act="cap-ready" ${q.length ? "" : "disabled"}>${!q.length ? "Tap who's running" : q.length === 1 ? `Get ready · ${esc(firstName(q[0]))}` : `Get ready · ${q.length} taking turns`}</button></div>`;
   }
   return h;
 }
@@ -1326,36 +1321,76 @@ function newHTML() {
     return `<h2 style="margin-top:18px">Last run · ${esc(athleteById(r.athleteId).name)}</h2>` + resultsHTML(r)
       + `<div class="row" style="justify-content:flex-end;margin-top:-4px"><span class="small muted" style="margin-right:auto">${cap.lastSaved ? "Saved" : ""}</span><button class="btn sm" data-act="open-report" data-id="${r.id}">Report</button></div>`;
   };
-  const nextLine = () => (cap.queue.length > 1 ? `<div class="small muted" style="text-align:center;margin:-4px 0 8px">Then: <b style="color:var(--text)">${esc(athleteById(nextUp(cap.athleteId)).name)}</b></div>` : "");
+  const sessLine = () => { if (!cap.session) return ""; const n = cap.session.ids.length, mins = Math.max(0, Math.round((Date.now() - cap.session.start) / 60000));
+    return `<div class="sessline"><span><b>Session</b> · ${n} run${n === 1 ? "" : "s"} saved · ${mins} min</span><button class="btn sm" data-act="cap-end">End session</button></div>`; };
+  const lineup = () => (athletes.length > 1 ? `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · drag ≡ to change the order</span></div>${lineupHTML("run")}<div style="height:8px"></div>` : "");
+  const stage = (color, left, right, body, cls = "") => `<section class="stage ${cls}"><div class="st-strip ${color}"><span>${left}</span><span>${right}</span></div><div class="st-body">${body}</div></section>`;
+  const dist = `<span data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</span> m`;
   if (cap.phase === "waiting") {
-    let h = sessionBar();
-    if (cap.error) h += `<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">${esc(cap.error)}</b></div>`;
-    h += `<div class="card tint" style="text-align:center;padding:22px 14px"><div class="label">Up now · ${test}</div><div class="upname">${name}</div>
-      <div class="status" style="font-size:40px;margin-top:10px">STEP IN</div><div class="muted">${rule.text}. You'll hear the chime when it's armed.</div>
-      <div class="zone ${sensor.inZone ? "on" : ""}" id="zone"><i></i><span>${sensor.inZone ? "Someone is in the zone: stand still…" : "Nobody in the zone yet"}</span></div></div>`;
-    h += nextLine() + upNext();
-    if (settings.solo) h += `<div class="small muted" style="text-align:center;margin:0 0 10px">Hands Free Mode: every run is saved and read out, then it waits for the next athlete.</div>`;
-    h += `<div class="grid2"><button class="btn" data-act="cap-cancel">Cancel</button><button class="btn" data-act="cap-armnow">Arm now</button></div>`;
-    if (!sensor.connected) h += `<div class="card" style="margin-top:12px"><div class="small muted" style="margin-bottom:8px">No sensor connected. Try it with a simulated athlete.</div><button class="btn" data-act="cap-sim-in">Simulate: athlete stands in</button></div>`;
-    return h + lastBlock();
+    let h = cap.error ? stage("d-amber", "No connection", "", `<div class="st-label">Up now</div><div class="st-name">${name}</div><div class="st-ev" style="color:var(--text)">${esc(cap.error)}</div>`)
+      : stage("d-green", "Ready", sensor.connected ? dist : "", `<div class="st-label">Up now</div><div class="st-name">${name}</div><div class="st-ev">${test}</div><div class="st-push" id="stcue">${cueHTML()}</div>`);
+    h += sessLine();
+    if (settings.solo) h += `<div class="small muted" style="margin:-6px 0 14px">Hands Free Mode: every run is saved and read out, then it waits for the next athlete.</div>`;
+    if (!sensor.connected) h += `<div class="card"><div class="small muted" style="margin-bottom:8px">No sensor connected. Try it with a simulated athlete.</div><button class="btn" data-act="cap-sim-in">Simulate: athlete stands in</button></div>`;
+    h += lineup() + lastBlock();
+    return h + `<div class="dock"><button class="btn" data-act="cap-cancel">Cancel</button><button class="btn" data-act="cap-armnow">Arm now</button></div>`;
   }
   if (cap.phase === "ready") {
-    let h = sessionBar() + `<div class="card tint ready" style="text-align:center;padding:24px 14px"><div class="label">${test}</div><div class="upname">${name}</div><div class="status">READY</div>
-      <div class="muted">${cap.mode === "sprint" ? `Go when ready. The clock starts once movement is confirmed and stops at ${cap.target} m.` : "Go when ready. It records the lefts, top speed and the speed into the box, and stops after the takeoff."}</div>
-      <div class="live" style="margin-top:12px"><span data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</span><span class="u" style="font-size:16px;color:var(--muted)"> m</span></div></div>`;
-    h += nextLine();
-    h += `<div class="grid2"><button class="btn" data-act="cap-cancel">Cancel</button><button class="btn" data-act="cap-rewait">Not ready</button></div>`;
-    if (!sensor.connected) h += `<div class="card" style="margin-top:12px"><div class="small muted" style="margin-bottom:8px">No sensor connected. Try it with a simulated run.</div><button class="btn" data-act="cap-sim">Simulate a run</button></div>`;
-    return h + lastBlock();
+    let h = stage("d-pink", "Armed", name, `<div class="st-go"><div>Go when</div><div class="pk">ready</div></div>
+      <div class="st-row"><div class="st-ev">${cap.mode === "sprint" ? `Clock starts on the first move · stops at ${cap.target} m` : "Records the lefts and the last 5 m · stops after takeoff"}</div><div class="st-ev" style="color:var(--text);white-space:nowrap">${dist}</div></div>`, "armed");
+    h += sessLine();
+    if (!sensor.connected) h += `<div class="card"><div class="small muted" style="margin-bottom:8px">No sensor connected. Try it with a simulated run.</div><button class="btn" data-act="cap-sim">Simulate a run</button></div>`;
+    h += lineup() + lastBlock();
+    return h + `<div class="dock"><button class="btn" data-act="cap-cancel">Cancel</button><button class="btn" data-act="cap-rewait">Not ready</button></div>`;
   }
-  if (cap.phase === "recording") return sessionBar() + liveCardHTML() + `<button class="btn" style="width:100%" data-act="cap-stop">Stop now</button>`;
-  if (cap.phase === "processing") return sessionBar() + `<div class="card tint" style="text-align:center;padding:30px 14px"><div class="upname">${name}</div><div class="status" style="font-size:36px">WORKING…</div><div class="muted">Working out the results.</div></div>`;
+  if (cap.phase === "recording") return stage("d-purple", "Recording", name, liveCardHTML()) + `<div class="dock"><button class="btn" data-act="cap-stop">Stop now</button></div>`;
+  if (cap.phase === "processing") return stage("d-blue", "Run done", name, `<div class="st-center"><div class="st-xl st-pulse">Working it out</div><div class="st-ev" style="margin-top:14px">The result shows here in a second.</div></div>`);
   // review (Hands Free off): save or throw away
-  const run = cap.run;
-  let h = sessionBar() + `<div class="between"><h1 style="margin-bottom:4px">${esc(athleteById(run.athleteId).name)}</h1><span class="pill">${test}</span></div>`;
-  h += resultsHTML(run);
-  h += `<div class="grid2"><button class="btn big danger" data-act="cap-discard">Throw away</button><button class="btn big primary" data-act="cap-save">Save${cap.queue.length > 1 ? ` · next: ${esc(firstName(nextUp(run.athleteId)))}` : ""}</button></div>`;
+  const run = cap.run, hd = headline(run);
+  let h = stage("d-blue", "Result", esc(athleteById(run.athleteId).name), `<div class="st-label">${hd.label}</div><div class="st-big" style="color:var(--blue)">${f2(hd.value)}<small>${hd.unit}</small></div><div class="st-ev">${test}</div>`, "short");
+  h += `<div class="run-res">${resultsHTML(run)}</div>`;
+  h += `<div class="dock"><button class="btn danger" data-act="cap-discard">Throw away</button><button class="btn primary" data-act="cap-save">Save${cap.queue.length > 1 ? ` · next ${esc(firstName(nextUp(run.athleteId)))}` : ""}</button></div>`;
   return h;
+}
+// under the name while waiting: what to do, or how far through the stand-still they are
+function cueHTML() {
+  if (sensor.connected && sensor.inZone && sensor.hold > 0.15) return `<div class="st-hold"><span>HOLD STILL</span><div class="d-bar"><b style="width:${Math.round(sensor.hold * 100)}%"></b></div></div>`;
+  if (sensor.connected && sensor.inZone) return `<div class="st-cue pk">Stand still…</div>`;
+  return `<div class="st-cue">${cap.mode === "sprint" ? "Stand still within 5 m to arm" : "Stand still on your mark to arm"}</div>`;
+}
+// The lineup, like the big display's roster: today's order above the line, everyone else below it.
+//   setup: tap adds or takes someone off · during a run: tap = who's up now · both: drag ≡ to reorder, also across the line
+function lineupHTML(mode) {
+  const q = cap.queue.filter((id) => athletes.some((a) => a.id === id));
+  const rest = athletes.filter((a) => !q.includes(a.id)).sort((a, b) => a.name.localeCompare(b.name));
+  const row = (a, i) => {
+    const inQ = i != null, up = mode === "run" && a.id === cap.athleteId;
+    return `<button class="lu-row${inQ ? " in" : ""}${up ? " up" : ""}" data-act="lu-tap" data-id="${a.id}"><span class="lu-n">${inQ ? i + 1 : "+"}</span><span class="nm">${esc(a.name)}</span>${up ? `<span class="lu-tag">UP</span>` : ""}<span class="d-grip" aria-label="Drag to move">≡</span></button>`;
+  };
+  return `<div class="lu" id="lineup" data-mode="${mode}">${q.map((id, i) => row(athleteById(id), i)).join("")}<div class="d-div lu-div">${q.length ? "Not in today's lineup" : "Tap to add to the lineup"}</div>${rest.map((a) => row(a)).join("")}</div>`;
+}
+const luDrag = { dragging: false };
+function lineupDrop(order, n) {
+  cap.queue = order.slice(0, n);
+  if (!cap.queue.includes(cap.athleteId) && cap.phase === "setup") cap.athleteId = cap.queue[0] || null;
+  settings.lastQueue = cap.queue.slice(); saveSettings(); render();
+  // tell the sensor, so the big display shows the same order
+  if (cap.phase !== "setup" && sensor.connected && !cap.sim) {
+    const names = order.map((id) => athleteById(id).name.slice(0, 23));
+    fetch("/order", { method: "POST", body: new URLSearchParams({ roster: names.join("\n"), lineup: n }), cache: "no-store" }).catch(() => {});
+  }
+}
+function lineupTap(id) {
+  if (cap.phase === "setup") {
+    const i = cap.queue.indexOf(id); if (i >= 0) cap.queue.splice(i, 1); else cap.queue.push(id);
+    cap.athleteId = cap.queue[0] || null;
+  } else {
+    if (!cap.queue.includes(id)) cap.queue.push(id);
+    if (id === cap.athleteId) return;
+    cap.athleteId = id;
+    if (!cap.sim && sensor.connected && (cap.phase === "waiting" || cap.phase === "ready")) { settings.lastQueue = cap.queue.slice(); settings.lastAthlete = id; saveSettings(); arm(sensor.state === 2); return; }
+  }
+  settings.lastQueue = cap.queue.slice(); settings.lastAthlete = cap.athleteId; saveSettings(); render();
 }
 function setupGuide(setup) {
   const ft = SETUPS[setup].boxFt, m = (ft * FT).toFixed(2);
@@ -1662,6 +1697,11 @@ function render() {
   const html = view === "home" ? homeHTML() : view === "new" ? newHTML() : view === "run" ? runHTML(viewArg) : view === "sessions" ? sessionsHTML() : view === "session" ? sessionHTML(viewArg)
     : view === "compare" ? compareHTML() : view === "analytics" ? analyticsHTML() : view === "settings" ? settingsHTML() : view === "athlete" ? athleteFormHTML(viewArg) : homeHTML();
   app.innerHTML = html;
+  const runOn = view === "new" && ["waiting", "ready", "recording", "processing", "review"].includes(cap.phase);
+  document.documentElement.classList.toggle("run-on", runOn);
+  // each run screen opens at the top, so the status strip and the name are in view
+  const ph = view + ":" + cap.phase; if (runOn && ph !== render.last) window.scrollTo(0, 0); render.last = ph;
+  const lu = $("#lineup"); if (lu) rosterDrag(lu, lineupDrop, luDrag, "id");
   lcDrawAll(); liveDraw(); LC = Object.fromEntries(Object.entries(LC).filter(([k]) => document.querySelector(`[data-lc="${k}"]`)));
   const tab = { home: "home", new: "new", run: "sessions", sessions: "sessions", session: "sessions", compare: "analytics", analytics: "analytics", settings: "settings", athlete: "settings" }[view];
   document.querySelectorAll(".tabbar [data-go]").forEach((b) => (b.dataset.go === tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
@@ -1679,6 +1719,7 @@ document.addEventListener("click", (e) => {
   const g = e.target.closest("[data-go]"); if (g) { backStack = []; if (g.dataset.go === "new") unlockAudio(); go(g.dataset.go); return; }
   const el = e.target.closest("[data-act]"); if (!el) return;
   const act = el.dataset.act, id = el.dataset.id, v = el.dataset.v;
+  if (act === "lu-tap") { if (!e.target.closest(".d-grip")) lineupTap(id); return; }
   if (act === "cmp-toggle") { e.stopPropagation(); toggleCompare(id); return; }
   switch (act) {
     case "back": back(); break;
