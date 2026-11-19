@@ -36,5 +36,6 @@ int main(int argc, char** argv) {
   draw(M); save(out + "/result_sprint.ppm");
   M.screen = S_NOLIDAR; draw(M); save(out + "/nolidar.ppm");
   M.screen = S_UPDATE; M.updatePct = 62; draw(M); save(out + "/update.ppm");
+  { Model A = M; A.screen = S_ABOUT; A.fw = "v4.5 \xC2\xB7 S3 \xC2\xB7 secure"; A.upS = 754; A.boots = 7; A.reset = "power"; draw(A); save(out + "/about.ppm"); }
   return 0;
 }

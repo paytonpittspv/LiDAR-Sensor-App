@@ -129,8 +129,8 @@ static void bigNum(const char* v, float x, float y, int size, RGB col, const cha
 }
 
 // ---------- what to show (filled in by the firmware) ----------
-enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM };
-static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim"};
+enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM, S_ABOUT };
+static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim", "about"};
 struct Cell { char k[14], v[14], u[8]; };
 struct Model {
   Screen screen = S_BOOT;
@@ -152,6 +152,8 @@ struct Model {
   // Wi-Fi help
   const char* ssid = ""; const char* pass = ""; const char* host = ""; const char* fw = "";
   int updatePct = 0;
+  // About: how long it has been on, why it last started, how many times it has started
+  uint32_t upS = 0; const char* reset = "power"; uint32_t boots = 0;
 };
 
 static void fmtFt(char* out, size_t n, float m) {
@@ -307,6 +309,23 @@ static void drawUpdate(const Model& M) {
   foot("Don't switch it off", "restarts by itself");
 }
 
+// About: the logo, who made it, the specs, and how long it has been running
+static void drawAbout(const Model& M) {
+  strip(M, "ABOUT", LOGO_LINE);
+  logo(10, 32, .62f);
+  text(F_XB18, "PAYTON'S ", 66, 46, FG);
+  float a = measure(F_XB18, "PAYTON'S "), b = measure(F_XB18, "LiDAR ");
+  text(F_XB18, "LiDAR ", 66 + a, 46, FG, LEFT, 66 + a, 66 + a + b); text(F_XB18, "SENSOR", 66 + a + b, 46, FG);
+  text(F_S11, "Designed by Payton Pitts \xC2\xB7 Tampa, FL \xC2\xB7 2026", 66, 60, DIM);
+  struct KV { const char* k; char v[28]; } kv[4] = {{"SERIAL", "SL-0001"}, {"POWER", "5 V USB \xC2\xB7 0.3 A"}, {"LASER", "Class 1 \xC2\xB7 eye-safe"}, {"FIRMWARE", ""}};
+  strlcpy(kv[3].v, M.fw, sizeof kv[3].v);
+  for (int i = 0; i < 4; i++) { float x = i % 2 ? 166 : 10, y = i < 2 ? 86 : 122; text(F_B11, kv[i].k, x, y, DIM); text(F_XB18, kv[i].v, x, y + 18, FG); }
+  char up[48]; uint32_t m = M.upS / 60;
+  if (m < 60) snprintf(up, sizeof up, "on %lu min \xC2\xB7 start #%lu (%s)", (unsigned long)m, (unsigned long)M.boots, M.reset);
+  else snprintf(up, sizeof up, "on %lu h %lu min \xC2\xB7 start #%lu (%s)", (unsigned long)(m / 60), (unsigned long)(m % 60), (unsigned long)M.boots, M.reset);
+  foot("paytonpittsdesigns.com", up);
+}
+
 static void draw(const Model& M) {
   fill(BG);
   switch (M.screen) {
@@ -320,6 +339,7 @@ static void draw(const Model& M) {
     case S_NOLIDAR: drawNoLidar(M); break;
     case S_UPDATE: drawUpdate(M); break;
     case S_AIM: drawAim(M); break;
+    case S_ABOUT: drawAbout(M); break;
   }
 }
 

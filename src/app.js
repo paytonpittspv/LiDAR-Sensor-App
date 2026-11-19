@@ -726,11 +726,20 @@ function updateFirmware(file) {
   x.onerror = () => { fwUpload = { pct: 0, msg: "Lost the sensor during the update. If its screen says UPDATING, wait for it to finish; otherwise try again." }; render(); };
   x.send(file);
 }
+// how long the sensor has been on, and why it last started (tells a power cut from a crash)
+function restartLine(t) {
+  const m = Math.floor(t.up / 60), on = m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+  const why = { power: "the power came on (a power cut, or switched on)", brownout: "the power dipped too low", crash: "the software crashed", froze: "the software froze and restarted itself", restart: "it was restarted (after an update)" }[t.reset] || "something else";
+  const bad = t.reset === "crash" || t.reset === "froze" || t.reset === "brownout";
+  return `On for <b>${on}</b> · started ${t.boots} time${t.boots === 1 ? "" : "s"} in all · last start: <b style="color:${bad ? "var(--bad)" : "var(--text)"}">${why}</b>`;
+}
 function firmwareCardHTML() {
   if (WEB_COPY) return "";
   return `<div class="card"><div class="label">Sensor firmware</div>
     <div class="small muted" style="margin:4px 0 10px">${sensor.connected && sensor.fw ? `The sensor is running <b>${esc(sensor.fw)}</b>.` : "Connect to the sensor to see its version."} To update it: with internet, <a href="${FIRMWARE_URL}">download SpeedLidar.bin</a> to Files; then on the SpeedLidar Wi-Fi, pick it here. Takes about 30 seconds.</div>
-    <label class="btn" style="cursor:pointer">Update firmware<input type="file" id="fwFile" accept=".bin,application/octet-stream" class="hidden"></label>
+    ${sensorTls && sensorTls.up != null ? `<div class="small" style="margin:-2px 0 10px">${restartLine(sensorTls)}</div>` : ""}
+    <div class="row"><label class="btn" style="cursor:pointer">Update firmware<input type="file" id="fwFile" accept=".bin,application/octet-stream" class="hidden"></label>
+    ${sensor.connected ? `<button class="btn" data-act="about-show">Show About on the sensor</button>` : ""}</div>
     ${fwUpload ? `<div class="small" style="margin-top:8px"><b id="fwPct">${fwUpload.pct}%</b> ${esc(fwUpload.msg)}</div>` : ""}</div>`;
 }
 // no sensor: play a simulated run through the same live view, in real time
@@ -1156,6 +1165,7 @@ function go(v, arg) {
   // New run always opens the start page (sprint or vault, who's running, where to stop) unless a run is being recorded right now
   if (v === "new" && cap.phase !== "recording" && cap.phase !== "processing" && cap.phase !== "summary") { if (cap.phase === "ready") stopNow(); cap.phase = "setup"; cap.step = "event"; cap.error = null; }
   render(); window.scrollTo(0, 0);
+  if (v === "settings" && sensor.connected) certSync();   // fresh up-time and restart info for the firmware card
 }
 function voiceCard() {
   return `<div class="card between" style="margin-top:6px"><div><b>Voice</b><div class="small muted">Says "${cap.queue.length > 1 ? "Name, ready" : "Ready"}" after the chime and reads every result aloud. Off: chime only.</div></div><label class="switch"><input type="checkbox" id="voiceSw" ${settings.voice ? "checked" : ""}><span></span></label></div>`;
@@ -1740,6 +1750,7 @@ document.addEventListener("click", (e) => {
     }
     case "day-report": sessPick = false; openSessionReport(runs.filter((r) => dayKey(r.ts) === id).map((r) => r.id)); render(); break;
     case "cert-copy": copySetupLink(); break;
+    case "about-show": fetch("/about", { method: "POST", cache: "no-store" }).then(() => toast("About is on the sensor's screen for 20 s."), () => toast("Couldn't reach the sensor.")); break;
     case "cert-check": certFetch().then((ok) => { if (!ok) toast("No internet right now: turn Wi-Fi off (cellular on) and try again."); else if (!certSaved()) toast("Not ready yet. It takes about 3 minutes after you commit."); render(); }); break;
     case "session-report": if (cap.session) openSessionReport(cap.session.ids); break;
     case "cap-mode": cap.mode = v; settings.lastMode = v; saveSettings(); cap.step = "distance"; cap.error = null; render(); window.scrollTo(0, 0); break;
