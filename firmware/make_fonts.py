@@ -14,10 +14,10 @@ import argparse, os, sys
 from PIL import ImageFont, Image, ImageDraw
 
 ASCII = "".join(chr(c) for c in range(32, 127))
-EXTRA = "\u00b7\u2013\u2019\u2026\u2212"   # middle dot, en dash, right quote, ellipsis, minus
+EXTRA = "\u00b7\u2013\u2019\u2026\u2212\u00b0"   # middle dot, en dash, right quote, ellipsis, minus, degree
 FULL = ASCII + EXTRA
-NUM = " 0123456789.'\"-%:−"
-CAPS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.'\"-%!?:·"
+NUM = " 0123456789.'\"-%:−+°"
+CAPS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.'\"-%!?:·+°"
 
 # (C name, face, size in px, characters). Sizes match the Screen Lab's Bold style.
 FONTS = [

@@ -129,8 +129,8 @@ static void bigNum(const char* v, float x, float y, int size, RGB col, const cha
 }
 
 // ---------- what to show (filled in by the firmware) ----------
-enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM, S_ABOUT };
-static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim", "about"};
+enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM, S_ABOUT, S_LEVEL };
+static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim", "about", "level"};
 struct Cell { char k[14], v[14], u[8]; };
 struct Model {
   Screen screen = S_BOOT;
@@ -154,6 +154,9 @@ struct Model {
   int updatePct = 0;
   // About: how long it has been on, why it last started, how many times it has started
   uint32_t upS = 0; const char* reset = "power"; uint32_t boots = 0;
+  // tilt sensor: the level, and whether the tripod was bumped since it was aimed
+  bool imuOk = false, zeroed = false, bumped = false;
+  float pitch = 0, roll = 0, levelAt = 30.48f, bumpDeg = 0; char bumpWhy[12] = "";
 };
 
 static void fmtFt(char* out, size_t n, float m) {
@@ -205,8 +208,13 @@ static void drawWifi(const Model& M) {
   text(F_S13, M.host, 10, 124, BLUE);
   foot("No phones connected yet", M.fw);
 }
+static void bumpNote(const Model& M, char* out, size_t n) {
+  if (!strcmp(M.bumpWhy, "turned")) snprintf(out, n, "Turned %.1f\xC2\xB0 since aimed", M.bumpDeg);
+  else if (!strcmp(M.bumpWhy, "leaned")) snprintf(out, n, "Leaned %.1f\xC2\xB0 since aimed", M.bumpDeg);
+  else snprintf(out, n, "Nose %s %.1f\xC2\xB0 since aimed", M.bumpDeg > 0 ? "up" : "down", fabsf(M.bumpDeg));
+}
 static void drawReady(const Model& M) {
-  strip(M, "READY", GREEN);
+  strip(M, M.bumped ? "TRIPOD MOVED \xC2\xB7 CHECK AIM" : "READY", M.bumped ? AMBER : GREEN);
   char d[16]; fmtDist(M, d, sizeof d, M.dist);
   text(F_B13, "DISTANCE", 10, 44, DIM);
   bigNum(M.distOk ? d : "-", 10, 98, 64, FG, M.distOk && !M.vault ? "m" : "", LEFT, 180);
@@ -224,7 +232,8 @@ static void drawReady(const Model& M) {
     text(F_S13, "a run in the app", 200, 82, DIM);
     text(F_S13, "Aim at the start mark", 10, 130, DIM);
   }
-  char l[32]; if (M.distOk) { fmtDist(M, d, sizeof d, M.dist); snprintf(l, sizeof l, "%s%s away", d, M.vault ? "" : " m"); } else strcpy(l, "Nothing in the beam");
+  char l[40]; if (M.bumped) bumpNote(M, l, sizeof l);
+  else if (M.distOk) { fmtDist(M, d, sizeof d, M.dist); snprintf(l, sizeof l, "%s%s away", d, M.vault ? "" : " m"); } else strcpy(l, "Nothing in the beam");
   char r[16]; snprintf(r, sizeof r, "%d phone%s", M.phones, M.phones == 1 ? "" : "s");
   foot(l, r);
 }
@@ -326,6 +335,43 @@ static void drawAbout(const Model& M) {
   foot("paytonpittsdesigns.com", up);
 }
 
+// Level: a bubble (left) that moves the way the tripod leans, and the beam's height down the runway (right).
+// Green when the nose is within 0.1° of level, amber within 0.4°, red past that.
+static void drawLevel(const Model& M) {
+  if (!M.imuOk) {
+    strip(M, "LEVEL", AMBER);
+    text(F_XB34, "NO TILT SENSOR", W / 2, 84, AMBER, CENTER);
+    text(F_S13, "Check the BMI160's four wires.", W / 2, 110, FG, CENTER);
+    foot("SDA GPIO 4 \xC2\xB7 SCL GPIO 5", "3V3 \xC2\xB7 GND");
+    return;
+  }
+  float ap = fabsf(M.pitch); RGB col = ap < .1f ? GREEN : ap < .4f ? AMBER : RED;
+  strip(M, ap < .1f ? "LEVEL \xC2\xB7 GOOD" : "LEVEL", col);
+  // bubble: 22 px per degree, pinned to the rim past that
+  const float cx = 62, cy = 96, R = 46;
+  for (int j = (int)(cy - R - 2); j <= (int)(cy + R + 2); j++) for (int i = (int)(cx - R - 2); i <= (int)(cx + R + 2); i++) {
+    float d = hypotf(i + .5f - cx, j + .5f - cy), a = 1.6f - fabsf(d - R); if (a > 0) blend(i, j, LINE, a > 1 ? 1 : a);
+    float r2 = 1.4f - fabsf(d - 6.5f); if (r2 > 0) blend(i, j, LINE, r2 > 1 ? 1 : r2);   // the 0.3° target ring
+  }
+  rect((int)(cx - R + 4), (int)cy, (int)(2 * R - 8), 1, LINE); rect((int)cx, (int)(cy - R + 4), 1, (int)(2 * R - 8), LINE);
+  float bx = M.roll * 22, by = -M.pitch * 22, L = hypotf(bx, by), lim = R - 9; if (L > lim) { bx *= lim / L; by *= lim / L; }
+  for (int j = (int)(cy + by - 9); j <= (int)(cy + by + 9); j++) for (int i = (int)(cx + bx - 9); i <= (int)(cx + bx + 9); i++) {
+    float a = 7.5f - hypotf(i + .5f - cx - bx, j + .5f - cy - by); if (a > 0) blend(i, j, col, a > 1 ? 1 : a);
+  }
+  // nose angle
+  text(F_B13, "NOSE", 126, 44, DIM);
+  char v[12]; snprintf(v, sizeof v, "%+.2f", M.pitch); if (ap < .005f) strcpy(v, "0.00");
+  bigNum(v, 126, 90, 58, col, "\xC2\xB0", LEFT, 120);
+  text(F_XB18, ap < .1f ? "LEVEL" : M.pitch > 0 ? "UP" : "DOWN", W - 10, 90, col, RIGHT);
+  // where the beam is at the distance the app gave
+  float off = M.levelAt * tanf(M.pitch * 0.01745329f) * 100;   // cm above the sensor's height
+  char at[16], h[24]; if (M.vault) snprintf(at, sizeof at, "AT %.0f FT", M.levelAt * 3.28084f); else snprintf(at, sizeof at, "AT %.0f M", M.levelAt);
+  if (fabsf(off) < 1) strcpy(h, "on height"); else snprintf(h, sizeof h, "%.0f cm %s", fabsf(off), off > 0 ? "high" : "low");
+  text(F_B11, "BEAM", 126, 116, DIM); text(F_B11, at, 160, 116, DIM);
+  text(F_XB18, h, 126, 138, FG);
+  foot(M.zeroed ? "Tilt the tripod head until it's green" : "Not zeroed yet: zero it in the app", M.bumped ? "moved since aimed" : "BMI160");
+}
+
 static void draw(const Model& M) {
   fill(BG);
   switch (M.screen) {
@@ -340,6 +386,7 @@ static void draw(const Model& M) {
     case S_UPDATE: drawUpdate(M); break;
     case S_AIM: drawAim(M); break;
     case S_ABOUT: drawAbout(M); break;
+    case S_LEVEL: drawLevel(M); break;
   }
 }
 

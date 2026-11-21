@@ -183,6 +183,7 @@ async function poll() {
     sensor.state = j.state || 0; sensor.sets = j.sets || 0; sensor.go = j.go || 0; sensor.inZone = !!j.in; sensor.hold = j.hold || 0;
     sensor.arm = j.arm != null ? j.arm : null; sensor.cfg = j.cfg || ""; sensor.phones = j.phones || 0; sensor.fw = j.fw || "";
     sensor.role = j.role || "control";
+    sensor.imu = !!j.imu; sensor.bump = !!j.bump; sensor.bumpDeg = j.bumpDeg || 0; sensor.bumpWhy = j.bumpWhy || "";
     if (j.pick != null) { sensor.pick = j.pick; sensor.pickName = j.pickName || ""; takePick(); }
     if (j.order != null) { sensor.order = j.order; takeOrder(); }
     // the first device on the sensor is the controller; any other one turns into the big display
@@ -195,6 +196,7 @@ async function poll() {
   const p = $("#conn"), noLidar = sensor.connected && !sensor.rate;
   p.className = "pill " + (!sensor.connected ? "off" : noLidar ? "warn" : "ok");
   p.textContent = !sensor.connected ? "No sensor" : noLidar ? "No LiDAR" : sensor.phones > 1 ? `${sensor.phones} devices` : "Connected";
+  bumpBar();
   const cue = $("#stcue"); if (cue) cue.innerHTML = cueHTML();
   document.querySelectorAll("[data-live]").forEach((el) => (el.textContent = sensor.d != null ? sensor.d.toFixed(2) : "—"));
   const z = $("#zone"); if (z) { z.classList.toggle("on", sensor.inZone); z.querySelector("span").textContent = sensor.inZone ? "Someone is in the zone: stand still…" : "Nobody in the zone yet"; }
@@ -1158,6 +1160,133 @@ function compareHTML() {
   return h;
 }
 
+// ---------------- level & aim (the BMI160 tilt sensor in the case) ----------------
+// The sensor reads its tilt 100 times a second. This page shows it as a level, works out where the beam is down
+// the runway, zeroes it, and handles the bump alarm. While it's open the sensor's own screen shows the level too.
+const lv = { j: null, sig: "", busy: false };
+const LV_DIST = [["100 ft", 100 * FT], ["150 ft", 150 * FT], ["30 m", 30], ["60 m", 60]];
+const lvImperial = () => settings.weightUnit === "lb";
+const lvFmtH = (m) => (lvImperial() ? `${Math.round(m / 0.0254)} in` : `${Math.round(m * 100)} cm`);
+const lvFmtD = (m) => (Math.abs(m / FT - Math.round(m / FT)) < 0.05 && Math.round(m / FT) % 50 === 0 ? `${Math.round(m / FT)} ft` : `${Math.round(m)} m`);
+function lvAt() {
+  if (settings.lvAt) return settings.lvAt;
+  return settings.lastMode === "vault" ? (SETUPS[settings.lastSetup] || SETUPS.runway100).boxFt * FT : 30;
+}
+// heights are stored in metres; typed in inches or cm (the body-weight unit picks which)
+const lvSensorH = () => settings.lvSensorH || 1.0, lvBackH = () => settings.lvBackH || 1.0;
+const lvColour = (ap) => (ap < 0.1 ? "var(--good)" : ap < 0.4 ? "var(--warn)" : "var(--bad)");
+async function lvFetch(body) {
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), body ? 2500 : 900);
+  try {
+    const url = `/level?watch=1&at=${lvAt().toFixed(2)}`;
+    const r = await fetch(url, body ? { method: "POST", body: new URLSearchParams(body), cache: "no-store", signal: ctl.signal } : { cache: "no-store", signal: ctl.signal });
+    return await r.json();
+  } catch (e) { return null; } finally { clearTimeout(to); }
+}
+function lvLoop() {
+  if (view !== "level") return;
+  if (!lv.busy && sensor.connected && !cap.sim) {
+    lvFetch().then((j) => {
+      if (j) { lv.j = j; const sig = [j.ok, j.zeroed, j.half, j.front, j.ref, j.bump].join(); if (sig !== lv.sig) { lv.sig = sig; if (view === "level") render(); } else lvPaint(); }
+    }).finally(() => setTimeout(lvLoop, 250));
+  } else setTimeout(lvLoop, 500);
+}
+async function lvDo(what) {
+  if (lv.busy) return; lv.busy = true;
+  const j = await lvFetch({ do: what });
+  lv.busy = false;
+  if (!j) { toast("Couldn't reach the sensor."); return; }
+  lv.j = j; lv.sig = ""; if (j.msg) toast(j.msg); render();
+}
+// side view: sensor on the left, the beam out to the chosen distance, the athletes' back height as a band
+function lvSideSVG(pitch) {
+  const D = lvAt(), h0 = lvSensorH(), back = lvBackH(), W = 320, H = 120, top = 2.0;
+  const x = (d) => 14 + (d / D) * (W - 28), y = (h) => H - 12 - (h / top) * (H - 24);
+  const hEnd = h0 + D * Math.tan((pitch || 0) * Math.PI / 180);
+  const band = 0.1;   // ±10 cm counts as on the back
+  return `<svg viewBox="0 0 ${W} ${H}" class="lv-side" role="img" aria-label="Beam from the sensor to ${lvFmtD(D)}">
+    <rect x="${x(0)}" y="${y(back + band)}" width="${x(D) - x(0)}" height="${y(back - band) - y(back + band)}" rx="4" fill="var(--good)" opacity=".16"/>
+    <line x1="${x(0)}" x2="${x(D)}" y1="${y(back)}" y2="${y(back)}" stroke="var(--good)" stroke-dasharray="4 4" stroke-width="1.5" opacity=".7"/>
+    <line x1="4" x2="${W - 4}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)" stroke-width="2"/>
+    <line x1="${x(0)}" x2="${x(0)}" y1="${y(0)}" y2="${y(h0)}" stroke="var(--muted)" stroke-width="2"/>
+    <line id="lvBeam" x1="${x(0)}" y1="${y(h0)}" x2="${x(D)}" y2="${y(Math.max(0, Math.min(top, hEnd)))}" stroke="var(--pink)" stroke-width="3" stroke-linecap="round"/>
+    <rect x="${x(0) - 9}" y="${y(h0) - 6}" width="18" height="12" rx="3" fill="var(--purple)"/>
+    <text x="${x(D)}" y="${H - 1}" text-anchor="end" font-size="11" fill="var(--muted)">${lvFmtD(D)}</text>
+    <text x="${x(0) + 14}" y="${y(back + band) - 4}" font-size="11" fill="var(--good)">back height</text></svg>`;
+}
+function lvBeamLine(pitch) {
+  const D = lvAt(), hEnd = lvSensorH() + D * Math.tan((pitch || 0) * Math.PI / 180), off = hEnd - lvBackH();
+  const ok = Math.abs(off) <= 0.1;
+  return { hEnd, ok, text: `At ${lvFmtD(D)} the beam is <b>${lvFmtH(hEnd)}</b> off the ground: ${ok ? `<b style="color:var(--good)">on the back ✓</b>` : `<b style="color:var(--warn)">${lvFmtH(Math.abs(off))} ${off > 0 ? "above" : "below"} back height</b>`}` };
+}
+// update the moving parts without redrawing the page (so inputs keep focus)
+function lvPaint() {
+  const j = lv.j; if (!j || view !== "level") return;
+  const ap = Math.abs(j.pitch), col = lvColour(ap), R = 70, k = 30;
+  let bx = j.roll * k, by = -j.pitch * k; const L = Math.hypot(bx, by), lim = R - 14; if (L > lim) { bx *= lim / L; by *= lim / L; }
+  const b = $("#lvDot"); if (b) { b.setAttribute("cx", 80 + bx); b.setAttribute("cy", 80 + by); b.setAttribute("fill", col); }
+  const n = $("#lvNum"); if (n) { n.textContent = (ap < 0.005 ? "0.00" : (j.pitch > 0 ? "+" : "−") + ap.toFixed(2)) + "°"; n.style.color = col; }
+  const w = $("#lvWord"); if (w) { w.textContent = ap < 0.1 ? "Level" : j.pitch > 0 ? "Nose up" : "Nose down"; w.style.color = col; }
+  const r = $("#lvRoll"); if (r) r.textContent = `Side lean ${Math.abs(j.roll).toFixed(1)}°${Math.abs(j.roll) < 1 ? " (fine)" : ""}`;
+  const st = $("#lvStill"); if (st) st.textContent = j.still ? "Still" : "Moving…";
+  const D = lvAt(), h0 = lvSensorH(), top = 2.0, H = 120, y = (h) => H - 12 - (h / top) * (H - 24);
+  const be = $("#lvBeam"); if (be) be.setAttribute("y2", y(Math.max(0, Math.min(top, h0 + D * Math.tan(j.pitch * Math.PI / 180)))));
+  const bl = $("#lvBeamTxt"); if (bl) bl.innerHTML = lvBeamLine(j.pitch).text;
+}
+function levelHTML() {
+  let h = `<button class="btn sm" data-act="back">‹ Back</button><h1 style="margin-top:10px">Level &amp; aim</h1>`;
+  if (cap.sim || !sensor.connected) return h + `<div class="card empty">Join the SpeedLidar Wi-Fi to use the level. It reads the tilt sensor inside the case.</div>`;
+  const j = lv.j;
+  if (!j) return h + `<div class="card empty">Reading the tilt sensor…</div>`;
+  if (!j.ok) return h + `<div class="card"><b style="color:var(--warn)">No tilt sensor found.</b><div class="small muted" style="margin-top:6px">Check the BMI160's four wires: 3V3 → 3V3, GND → GND, SDA → GPIO 4, SCL → GPIO 5. Its CS pin goes to 3V3 and SAO to GND. The sensor looks for it every 5 seconds.</div></div>`;
+  const unit = lvImperial() ? "in" : "cm", toU = (m) => (lvImperial() ? Math.round(m / 0.0254) : Math.round(m * 100));
+  const at = lvAt();
+  // the level itself
+  h += `<div class="card lv-card">
+    <svg viewBox="0 0 160 160" class="lv-bubble" aria-hidden="true"><circle cx="80" cy="80" r="70" fill="none" stroke="var(--line)" stroke-width="3"/><circle cx="80" cy="80" r="9" fill="none" stroke="var(--line)" stroke-width="2"/>
+      <path d="M18 80H142M80 18V142" stroke="var(--line)" stroke-width="1.5"/><circle id="lvDot" cx="80" cy="80" r="11" fill="var(--good)"/></svg>
+    <div class="lv-read"><div class="label">Nose</div><div id="lvNum" class="lv-num">—</div><div id="lvWord" class="lv-word">—</div>
+      <div class="small muted"><span id="lvRoll"></span> · <span id="lvStill"></span></div></div></div>
+    <div class="small muted" style="margin:-4px 0 12px">Tilt the tripod head until the dot is in the middle and it turns green. The screen on the back of the sensor shows the same level while this page is open.${j.zeroed ? "" : ` <b style="color:var(--warn)">Zero it first (below), or it's only as level as the chip sits.</b>`}</div>`;
+  // beam height down the runway
+  h += `<div class="card"><div class="label">Where the beam goes</div>${lvSideSVG(j.pitch)}
+    <div id="lvBeamTxt" class="small" style="margin:6px 0 10px">${lvBeamLine(j.pitch).text}</div>
+    <div class="seg" style="margin-bottom:10px">${LV_DIST.map(([t, d]) => `<button data-act="lv-at" data-v="${d}" aria-pressed="${Math.abs(d - at) < 0.05}">${t}</button>`).join("")}</div>
+    <div class="grid2"><div class="field" style="margin:0"><label for="lvSensorH">Sensor height (${unit})</label><input type="number" inputmode="decimal" id="lvSensorH" value="${toU(lvSensorH())}"></div>
+      <div class="field" style="margin:0"><label for="lvBackH">Back height (${unit})</label><input type="number" inputmode="decimal" id="lvBackH" value="${toU(lvBackH())}"></div></div>
+    <div class="small muted" style="margin-top:8px">Sensor height: the ground to the middle of the front window. Back height: where you want the beam to hit, about the middle of the lower back. Set the tripod to that height and level it, and the beam stays on the back the whole way down.</div></div>`;
+  // bump alarm
+  const bumpTxt = j.bumpWhy === "turned" ? `turned ${j.bumpDeg.toFixed(1)}° left or right` : j.bumpWhy === "leaned" ? `leaned ${j.bumpDeg.toFixed(1)}° to the side` : `nose ${j.bumpDeg > 0 ? "up" : "down"} ${Math.abs(j.bumpDeg).toFixed(1)}°`;
+  h += `<div class="card${j.bump ? " lv-warn" : ""}"><div class="label">Bump alarm</div>
+    <div style="margin:4px 0 10px">${j.bump ? `<b>The tripod moved:</b> ${bumpTxt} since it was aimed. Re-aim it (the Aiming screen saves the new aim when it locks on), or save where it points now.`
+      : j.ref ? "Watching: if the tripod gets knocked, the sensor's screen and this app say so." : "Starts watching once it's aimed: when the Aiming screen locks on, or when the first run is set up."}</div>
+    <button class="btn${j.bump ? " primary" : ""}" data-act="lv-do" data-v="lock">${j.ref ? "Save this aim" : "Save this aim now"}</button></div>`;
+  // zero and front: once
+  h += `<h2>Set up once</h2><div class="card"><div class="between"><div class="label">1 · Zero it</div>${j.zeroed ? `<span class="pill ok">Zeroed ✓</span>` : `<span class="pill">Not yet</span>`}</div>
+    <div class="small muted" style="margin:6px 0 10px">Teaches it what level is. Use any flat table or the floor: it doesn't have to be level, because the two readings, turned around, cancel out the slope. Stand it on its tripod block.</div>
+    ${j.half ? `<div style="margin-bottom:10px"><b>Now turn it around 180° on the same spot</b> (lens pointing the other way), let go, and tap Second reading.</div>
+      <div class="row"><button class="btn primary" data-act="lv-do" data-v="zero2">Second reading</button><button class="btn" data-act="lv-do" data-v="cancel">Cancel</button></div>`
+    : `<div class="row"><button class="btn${j.zeroed ? "" : " primary"}" data-act="lv-do" data-v="zero1">First reading</button><button class="btn ghost" data-act="lv-do" data-v="zero">It's level: zero here</button></div>`}</div>
+    <div class="card"><div class="between"><div class="label">2 · Learn the front</div>${j.front ? `<span class="pill ok">Learned ✓</span>` : `<span class="pill">Not yet</span>`}</div>
+    <div class="small muted" style="margin:6px 0 10px">So it knows nose up from side lean. On the tripod, level it, then tip the lens end <b>down</b> about 5° and hold it there while you tap.</div>
+    <button class="btn${j.zeroed && !j.front ? " primary" : ""}" data-act="lv-do" data-v="front">Learn the front</button></div>`;
+  return h;
+}
+function lvBind() {
+  for (const [id, key] of [["#lvSensorH", "lvSensorH"], ["#lvBackH", "lvBackH"]]) {
+    const el = $(id); if (!el) continue;
+    el.oninput = () => { const v = parseFloat(el.value); if (v > 0) { settings[key] = lvImperial() ? v * 0.0254 : v / 100; saveSettings(); const svg = $(".lv-side"); if (svg && lv.j) svg.outerHTML = lvSideSVG(lv.j.pitch); lvPaint(); } };
+  }
+  lvPaint();
+}
+// the bar under the header when the tripod got knocked
+function bumpBar() {
+  const b = $("#bumpbar"); if (!b) return;
+  const on = sensor.connected && sensor.bump && view !== "level" && !disp.on;
+  b.hidden = !on;
+  if (on) b.innerHTML = `<b>Tripod moved</b><span>${sensor.bumpWhy === "turned" ? `turned ${sensor.bumpDeg.toFixed(1)}°` : sensor.bumpWhy === "leaned" ? `leaned ${sensor.bumpDeg.toFixed(1)}°` : `nose ${sensor.bumpDeg > 0 ? "up" : "down"} ${Math.abs(sensor.bumpDeg).toFixed(1)}°`} since it was aimed · Check aim ›</span>`;
+}
+
 // ---------------- views ----------------
 let view = "home", viewArg = null;
 function go(v, arg) {
@@ -1166,6 +1295,7 @@ function go(v, arg) {
   if (v === "new" && cap.phase !== "recording" && cap.phase !== "processing" && cap.phase !== "summary") { if (cap.phase === "ready") stopNow(); cap.phase = "setup"; cap.step = "event"; cap.error = null; }
   render(); window.scrollTo(0, 0);
   if (v === "settings" && sensor.connected) certSync();   // fresh up-time and restart info for the firmware card
+  if (v === "level") { lv.sig = ""; lvLoop(); }
 }
 function voiceCard() {
   return `<div class="card between" style="margin-top:6px"><div><b>Voice</b><div class="small muted">Says "${cap.queue.length > 1 ? "Name, ready" : "Ready"}" after the chime and reads every result aloud. Off: chime only.</div></div><label class="switch"><input type="checkbox" id="voiceSw" ${settings.voice ? "checked" : ""}><span></span></label></div>`;
@@ -1407,14 +1537,14 @@ function setupGuide(setup) {
   if (SETUPS[setup].pole) return `<div class="card howto"><div class="label">Pole runs · same setup every time · ${ft} ft</div><ol>
     <li>Pick where the box would be and put a <b>cone</b> there: the <b>box mark</b>. Everything is measured from it, just like the box on the runway.</li>
     <li>Run a tape from the cone straight back up the lane to <b>${ft} ft</b> and stand the tripod so the sensor window is right over that mark.</li>
-    <li>Aim straight down the lane at the cone, at about lower-back height.</li>
+    <li>Aim straight down the lane at the cone, at about lower-back height. <a href="#" data-act="go-level">Level it</a> so the beam stays at that height.</li>
     <li><b>Check it:</b> stand at the cone. The live distance should read about <b>${m} m</b>. Here: <b data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</b> m.</li>
     <li>Take off where you would on the runway. There's no box to hit, so the takeoff is found from the moment your feet leave the ground (the steps stop and speed drops at the pop-up), then the lefts are counted back from there.</li></ol>
     <div class="small muted">Start marks, lefts and the takeoff are in feet from the box mark, exactly like runway jumps, so the two compare directly.</div></div>`;
   return `<div class="card howto"><div class="label">Same setup every time · ${ft} ft</div><ol>
     <li>Run a tape from the <b>back of the box</b> straight up the middle of the runway to <b>${ft} ft</b>. Mark it with tape so it's there next time.</li>
     <li>Stand the tripod so the <b>front of the case</b> (the sensor window) is right over that mark.</li>
-    <li>Aim straight down the runway at the box, at about lower-back height.</li>
+    <li>Aim straight down the runway at the box, at about lower-back height. <a href="#" data-act="go-level">Level it</a> so the beam stays at that height.</li>
     <li><b>Check it:</b> stand in the box. The live distance should read about <b>${m} m</b>. Here: <b data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</b> m.</li>
     <li>Run-ups up to about ${ft - 8} ft fit in front of the tripod.${setup === "runway100" ? " For longer run-ups, use the 150 ft setup." : ""}</li></ol>
     <div class="small muted">Everything is measured from the box, so you don't enter run-ups: start marks, takeoff spots, lefts and the last 5 m are worked out on every jump.</div></div>`;
@@ -1683,7 +1813,7 @@ function settingsHTML() {
   h += `<h2>Sound and Hands Free</h2>${chimeCard()}<div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Save every run and get ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>${voiceCard()}
     <div class="card between"><div><b>Body weight in</b></div><div class="seg" style="width:140px"><button data-act="unit" data-v="lb" aria-pressed="${settings.weightUnit === "lb"}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${settings.weightUnit === "kg"}">kg</button></div></div>
     <div class="card between"><div><b>Look</b></div><div class="seg" style="width:200px"><button data-act="theme" data-v="" aria-pressed="${!settings.theme}">Auto</button><button data-act="theme" data-v="dark" aria-pressed="${settings.theme === "dark"}">Dark</button><button data-act="theme" data-v="light" aria-pressed="${settings.theme === "light"}">Light</button></div></div>`;
-  h += `<h2>Vault setup</h2>${setupGuide("runway100")}${setupGuide("runway150")}`;
+  h += `<h2>Tripod setup</h2><div class="card between"><div><b>Level &amp; aim</b><div class="small muted">Digital level, where the beam lands down the runway, and the bump alarm.${sensor.connected && sensor.bump ? ` <b style="color:var(--warn)">The tripod moved.</b>` : ""}</div></div><button class="btn" data-act="go-level">Open</button></div>${setupGuide("runway100")}${setupGuide("runway150")}`;
   h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">${WEB_COPY ? "This copy of the app opens with no connection at all." : "This is the sensor's page. Send runs to your home-screen app after each session."} ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
     <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
     ${secureCardHTML()}${devicesCardHTML()}${firmwareCardHTML()}${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}
@@ -1705,7 +1835,7 @@ let backStack = [];
 function render() {
   const app = $("#app");
   const html = view === "home" ? homeHTML() : view === "new" ? newHTML() : view === "run" ? runHTML(viewArg) : view === "sessions" ? sessionsHTML() : view === "session" ? sessionHTML(viewArg)
-    : view === "compare" ? compareHTML() : view === "analytics" ? analyticsHTML() : view === "settings" ? settingsHTML() : view === "athlete" ? athleteFormHTML(viewArg) : homeHTML();
+    : view === "compare" ? compareHTML() : view === "analytics" ? analyticsHTML() : view === "settings" ? settingsHTML() : view === "athlete" ? athleteFormHTML(viewArg) : view === "level" ? levelHTML() : homeHTML();
   app.innerHTML = html;
   const runOn = view === "new" && ["waiting", "ready", "recording", "processing", "review"].includes(cap.phase);
   document.documentElement.classList.toggle("run-on", runOn);
@@ -1713,7 +1843,7 @@ function render() {
   const ph = view + ":" + cap.phase; if (runOn && ph !== render.last) window.scrollTo(0, 0); render.last = ph;
   const lu = $("#lineup"); if (lu) rosterDrag(lu, lineupDrop, luDrag, "id");
   lcDrawAll(); liveDraw(); LC = Object.fromEntries(Object.entries(LC).filter(([k]) => document.querySelector(`[data-lc="${k}"]`)));
-  const tab = { home: "home", new: "new", run: "sessions", sessions: "sessions", session: "sessions", compare: "analytics", analytics: "analytics", settings: "settings", athlete: "settings" }[view];
+  const tab = { home: "home", new: "new", run: "sessions", sessions: "sessions", session: "sessions", compare: "analytics", analytics: "analytics", settings: "settings", athlete: "settings", level: "settings" }[view];
   document.querySelectorAll(".tabbar [data-go]").forEach((b) => (b.dataset.go === tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
   const sw = $("#soloSw"); if (sw) sw.onchange = () => { settings.solo = sw.checked; saveSettings(); if (sw.checked) unlockAudio(); };
   const vs = $("#voiceSw"); if (vs) vs.onchange = () => { settings.voice = vs.checked; saveSettings(); unlockAudio(); if (vs.checked) say("Voice on"); };
@@ -1721,6 +1851,8 @@ function render() {
   const imp = $("#importFile"); if (imp) imp.onchange = () => importBackup(imp.files[0]);
   const fwf = $("#fwFile"); if (fwf) fwf.onchange = () => updateFirmware(fwf.files[0]);
   const sf = $("#syncFile"); if (sf) sf.onchange = () => importBackup(sf.files[0]);
+  if (view === "level") lvBind();
+  bumpBar();
 }
 function nav(v, arg) { backStack.push([view, viewArg]); go(v, arg); }
 function back() { const p = backStack.pop(); if (p) go(p[0], p[1]); else go("home"); }
@@ -1750,6 +1882,9 @@ document.addEventListener("click", (e) => {
     }
     case "day-report": sessPick = false; openSessionReport(runs.filter((r) => dayKey(r.ts) === id).map((r) => r.id)); render(); break;
     case "cert-copy": copySetupLink(); break;
+    case "go-level": e.preventDefault(); nav("level"); break;
+    case "lv-do": lvDo(v); break;
+    case "lv-at": settings.lvAt = +v; saveSettings(); render(); break;
     case "about-show": fetch("/about", { method: "POST", cache: "no-store" }).then(() => toast("About is on the sensor's screen for 20 s."), () => toast("Couldn't reach the sensor.")); break;
     case "cert-check": certFetch().then((ok) => { if (!ok) toast("No internet right now: turn Wi-Fi off (cellular on) and try again."); else if (!certSaved()) toast("Not ready yet. It takes about 3 minutes after you commit."); render(); }); break;
     case "session-report": if (cap.session) openSessionReport(cap.session.ids); break;

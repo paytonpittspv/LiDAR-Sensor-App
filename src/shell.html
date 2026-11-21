@@ -495,6 +495,18 @@ html.disp-on,html.disp-on body{overflow:hidden}
   .d-aim{flex-direction:row;max-height:45vh}
 }
 @media (prefers-reduced-motion:reduce){.d-pulse,#disp:has(.d-fit){animation:none}}
+/* level & aim */
+.lv-card{display:flex;align-items:center;gap:16px}
+.lv-bubble{width:42%;max-width:170px;flex:none}
+.lv-read{min-width:0}
+.lv-num{font-family:var(--display);font-weight:800;font-size:clamp(44px,13vw,64px);line-height:1;font-variant-numeric:tabular-nums}
+.lv-word{font-family:var(--display);font-weight:800;font-size:22px;text-transform:uppercase;letter-spacing:.5px;margin:2px 0 4px}
+.lv-side{width:100%;height:auto;display:block;margin-top:8px}
+.lv-warn{border-color:var(--warn);background:rgba(255,176,32,.1)}
+.bumpbar{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:calc(100% - 32px);max-width:648px;margin:10px auto 0;padding:10px 14px;border:0;border-radius:14px;
+  background:var(--warn);color:#17142c;text-align:left;cursor:pointer;font-size:14px}
+.bumpbar b{font-family:var(--display);font-weight:800;font-size:18px;text-transform:uppercase;letter-spacing:.4px}
+.bumpbar[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -502,6 +514,7 @@ html.disp-on,html.disp-on body{overflow:hidden}
   <div class="brand"><svg class="hmark" viewBox="0 0 80 41" aria-hidden="true"><rect x="0" y="0" width="54" height="8" rx="3" fill="#8b5cf6"/><rect x="0" y="10" width="54" height="22" rx="4" fill="#2a2636"/><rect x="19" y="34" width="16" height="6" rx="1" fill="#22b8ff"/><g stroke="#cfc8e6" stroke-width="4" stroke-linecap="round"><path d="M61 13H75"/><path d="M61 21H71"/><path d="M61 29H75"/></g></svg>PAYTON'S <b>LiDAR</b> SENSOR</div>
   <span id="conn" class="pill off">No sensor</span>
 </header>
+<button id="bumpbar" class="bumpbar" data-act="go-level" hidden></button>
 <main id="app"></main>
 <nav class="tabbar" aria-label="Main">
   <button data-go="home" aria-label="Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Home</button>

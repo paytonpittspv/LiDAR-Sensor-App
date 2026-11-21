@@ -37,5 +37,10 @@ int main(int argc, char** argv) {
   M.screen = S_NOLIDAR; draw(M); save(out + "/nolidar.ppm");
   M.screen = S_UPDATE; M.updatePct = 62; draw(M); save(out + "/update.ppm");
   { Model A = M; A.screen = S_ABOUT; A.fw = "v4.5 \xC2\xB7 S3 \xC2\xB7 secure"; A.upS = 754; A.boots = 7; A.reset = "power"; draw(A); save(out + "/about.ppm"); }
+  { Model L = M; L.screen = S_LEVEL; L.imuOk = true; L.zeroed = true; L.pitch = .42f; L.roll = -.6f; draw(L); save(out + "/level_off.ppm");
+    L.pitch = -.18f; L.roll = .2f; draw(L); save(out + "/level_close.ppm");
+    L.pitch = .03f; L.roll = .05f; draw(L); save(out + "/level_good.ppm");
+    L.imuOk = false; draw(L); save(out + "/level_none.ppm"); }
+  { Model B = M; B.screen = S_READY; B.inZone = false; B.hold = 0; B.bumped = true; B.bumpDeg = -.6f; strcpy(B.bumpWhy, "tilted"); draw(B); save(out + "/ready_bumped.ppm"); }
   return 0;
 }
