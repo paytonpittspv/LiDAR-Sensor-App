@@ -23,7 +23,7 @@ FONTS = ('@font-face{font-family:"Report Sans";src:url(data:font/woff;base64,%s)
          ) % (font("Inter-Regular.woff"), font("Inter-SemiBold.woff"), font("BarlowCondensed-Bold.woff"), font("BarlowCondensed-ExtraBold.woff"))
 
 app = read("app.js").replace("/*__REPORT__*/", read("report.js"))
-html = read("shell.html").replace("/*__FONTS__*/", FONTS).replace("/*__ENGINE__*/", read("engine.js")).replace("/*__APP__*/", app)
+html = read("shell.html").replace("/*__FONTS__*/", FONTS).replace("/*__ENGINE__*/", read("engine.js") + "\n" + read("pod.js")).replace("/*__APP__*/", app)
 # The Home Screen icon goes inside the page itself. "Add to Home Screen" then never has to fetch it, which
 # matters on the sensor: it takes one secure connection at a time, and a missed fetch leaves iOS with a
 # screenshot instead of the icon.
