@@ -7,9 +7,22 @@ const CACHE = "lidar-sensor-" + VERSION;
 const SENSOR = "sensor.paytonpittsdesigns.com";
 const onSensor = self.location.hostname === SENSOR;
 const ASSETS = ["./", "index.html", "manifest.webmanifest", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/favicon-32.png"];
-const API = /^\/(live|arm|stop|data|tls|cert|csr)(\/|$)/;
+const API = /^\/(live|arm|stop|data|tls|cert|csr|level|pod|show|claim|screen|pick|order|about|update)(\/|$)/;
 
-self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
+// Save the app one file at a time, the page first. The sensor takes only a few secure connections at once: asking
+// for everything together can make one request fail, and a single failure used to throw the whole copy away (so the
+// app wouldn't open without the sensor). Now the page alone is enough to open offline; the icons are a bonus, and
+// anything missed is fetched again on the next visit ("fill" message from the page).
+async function fill() {
+  const c = await caches.open(CACHE);
+  for (const a of ASSETS) {
+    if (await c.match(a)) continue;
+    for (let i = 0; i < 3; i++) { try { const r = await fetch(a, { cache: "no-store" }); if (r.ok) { await c.put(a, r); break; } } catch (e) {} await new Promise((ok) => setTimeout(ok, 400)); }
+  }
+  return !!(await c.match("index.html"));
+}
+self.addEventListener("install", (e) => { e.waitUntil(fill().then(() => self.skipWaiting())); });
+self.addEventListener("message", (e) => { if (e.data === "fill") e.waitUntil(fill().then((ok) => e.source && e.source.postMessage({ offline: ok }))); });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith("lidar-sensor-") && k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });

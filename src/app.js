@@ -211,7 +211,15 @@ const SECURE_HOST = "sensor.paytonpittsdesigns.com", SECURE_URL = "https://" + S
 const ON_SECURE = location.hostname === SECURE_HOST;
 const ON_PLAIN = location.protocol === "http:";
 const WEB_COPY = location.protocol === "https:" && !ON_SECURE;
-if (location.protocol === "https:" && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+// the saved copy that opens without the sensor: register, then ask it to fill in anything it missed
+let offlineReady = null;
+if ((location.protocol === "https:" || location.hostname === "localhost") && "serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && "offline" in e.data) { offlineReady = e.data.offline; if (view === "settings") render(); } });
+  // (this code runs once the phone's database has opened, which is usually after the page's "load" event: waiting
+  // for that event here meant the offline copy was often never set up, so register right away if it's been)
+  const reg = () => navigator.serviceWorker.register("sw.js").then(() => navigator.serviceWorker.ready).then((r) => { if (r.active) r.active.postMessage("fill"); }).catch(() => { offlineReady = false; });
+  if (document.readyState === "complete") reg(); else window.addEventListener("load", reg);
+}
 
 // ---------------- the sensor's certificate ----------------
 // The GitHub job (cert/) gets and renews the certificate. When the phone has internet the app downloads the
@@ -264,7 +272,9 @@ async function copySetupLink() {
 }
 function secureCardHTML() {
   const have = certSaved(), when = (s) => new Date(s).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-  if (ON_SECURE) return `<div class="card"><div class="label">Secure address</div><div style="margin-top:4px"><b>${SECURE_HOST}</b></div>
+  const off = offlineReady === true ? `<div class="small" style="margin-top:6px;color:var(--good)">\u2713 Saved on this phone: the app opens without the sensor.</div>`
+    : offlineReady === false ? `<div class="small" style="margin-top:6px;color:var(--warn)">Not saved for use without the sensor yet. Keep the app open on the sensor's Wi-Fi for 10 seconds.</div>` : "";
+  if (ON_SECURE) return `<div class="card"><div class="label">Secure address</div><div style="margin-top:4px"><b>${SECURE_HOST}</b></div>${off}
     <div class="small muted" style="margin-top:4px">${sensorTls && sensorTls.until ? `Certificate on the sensor good until ${when(sensorTls.until)}.` : "Connect to the sensor to check its certificate."} ${have ? `Newest one saved on this phone: until ${when(have.until)}.` : ""} It renews by itself: open the app with internet now and then and it carries the new one to the sensor.</div></div>`;
   if (WEB_COPY) return `<div class="card"><div class="label">The app's new home</div><div class="small muted" style="margin-top:4px">Once the sensor's secure address is set up, use <b>${SECURE_HOST}</b> instead of this copy: it records and opens offline, and keeps every run in one place. Move your runs there with <b>Copy runs</b> below, then <b>Paste runs</b> in the new app.</div></div>`;
   // on the sensor's plain address: one-time setup
