@@ -57,10 +57,14 @@ jobs:
           arduino-cli compile --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" --output-dir build firmware/SpeedLidar
           cp build/SpeedLidar.ino.bin SpeedLidar.bin
           ls -la SpeedLidar.bin
+          # the waist pod (Seeed XIAO ESP32-S3)
+          arduino-cli compile --fqbn "esp32:esp32:XIAO_ESP32S3:PSRAM=opi" --output-dir build-pod firmware/Pod
+          cp build-pod/Pod.ino.bin Pod.bin
+          ls -la Pod.bin
       - name: Publish on the "firmware" release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view firmware >/dev/null 2>&1 || gh release create firmware --title "Sensor firmware (latest)" --notes "SpeedLidar.bin for the ESP32-S3 sensor. Update from the app: Settings → Sensor firmware."
-          gh release upload firmware SpeedLidar.bin --clobber
-          gh release edit firmware --notes "SpeedLidar.bin for the ESP32-S3 sensor, built from $(git rev-parse --short HEAD) on $(date -u +%Y-%m-%d). Update from the app: Settings → Sensor firmware, or flash it over USB."
+          gh release upload firmware SpeedLidar.bin Pod.bin --clobber
+          gh release edit firmware --notes "SpeedLidar.bin for the ESP32-S3 sensor and Pod.bin for the waist pod (XIAO ESP32-S3), built from $(git rev-parse --short HEAD) on $(date -u +%Y-%m-%d). Update from the app: Settings → Sensor firmware / Waist pod, or flash over USB."
