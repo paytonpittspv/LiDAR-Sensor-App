@@ -2256,11 +2256,17 @@ function jumpAnalyticsHTML(mine) {
       <div class="small muted" style="margin:8px 0 ${ch ? 4 : 0}px">Time to takeoff: from starting the dip to leaving the ground (average ${avgT.toFixed(2)} s): shorter is snappier. RSImod: jump height ÷ that time, so it rewards height from a quick dip, not a big slow one.${jkg(anState.athleteId) ? "" : " Add body weight for watts."}</div>
       ${ch ? `<div class="label" style="margin-top:6px">Best RSImod per day</div>${ch}` : ""}</div>`;
   }
-  // everyone's best, as bars
-  const tops = athletes.map((a) => ({ a, j: jumps.filter((j) => j.athleteId === a.id).reduce((b, j) => (!b || j.h > b.h ? j : b), null) })).filter((x) => x.j).sort((x, y) => y.j.h - x.j.h);
-  if (tops.length > 1) {
-    const mx = tops[0].j.h;
-    h += `<div class="card"><div class="label" style="margin-bottom:8px">Everyone's best · takeoff to peak</div>${tops.map(({ a, j }) => `<div class="jrank${a.id === anState.athleteId ? " me" : ""}" data-act="an-ath" data-id="${a.id}"><span class="nm">${esc(a.name)}</span><span class="bar"><b style="width:${((100 * j.h) / mx).toFixed(1)}%"></b></span><span class="v">${cm(j.h)}</span></div>`).join("")}</div>`;
+  // compare: pick who (up to six), ranked bars, print the group report
+  const withJ = athletes.filter((x) => jumps.some((j) => j.athleteId === x.id));
+  if (withJ.length > 1) {
+    if (!anState.jcmp) anState.jcmp = withJ.slice(0, 6).map((x) => x.id);
+    const sel = anState.jcmp.filter((id) => withJ.some((x) => x.id === id));
+    const tops = sel.map((id) => ({ a: athletes.find((x) => x.id === id), j: jumps.filter((j) => j.athleteId === id).reduce((b, j) => (!b || j.h > b.h ? j : b), null) })).filter((x) => x.j).sort((x, y) => y.j.h - x.j.h);
+    const mx = tops.length ? tops[0].j.h : 1;
+    h += `<div class="card"><div class="between"><div class="label">Compare athletes · best takeoff to peak</div><span class="small muted">cm</span></div>
+      <div class="chips" style="margin:8px 0 10px">${withJ.map((x) => `<button class="chip" data-act="jcmp" data-id="${x.id}" aria-pressed="${sel.includes(x.id)}">${esc(firstName(x.id))}</button>`).join("")}</div>
+      ${tops.map(({ a, j }) => `<div class="jrank${a.id === anState.athleteId ? " me" : ""}" data-act="an-ath" data-id="${a.id}"><span class="nm">${esc(a.name)}</span><span class="bar"><b style="width:${((100 * j.h) / mx).toFixed(1)}%"></b></span><span class="v">${cm(j.h)}</span></div>`).join("")}
+      <button class="btn" style="width:100%;margin-top:10px" data-act="jcmp-report" ${sel.length > 1 ? "" : "disabled"}>Print group comparison (PDF)</button></div>`;
   }
   h += `<h2>Jumps</h2><div class="card tw"><table class="jtab"><thead><tr><th>When</th><th>Height</th><th>Mat</th><th>Time</th><th>RSI</th><th></th></tr></thead><tbody>${mine.slice(0, 60).map((j) => `<tr>
     <td style="white-space:nowrap"><b>${dayLabel(dayKey(j.ts))}</b><div class="small muted">${timeLabel(j.ts)}${j.sim ? " sim" : ""}</div></td>
@@ -2472,6 +2478,8 @@ document.addEventListener("click", (e) => {
     case "an-ath": anState.athleteId = id; if (!(anState.test === "jump" ? jumps.some((j) => j.athleteId === id) : runs.some((r) => r.athleteId === id && testKey(r) === anState.test))) anState.test = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); break;
     case "mid-out": settings.midOut = +v; saveSettings(); render(); break;
     case "an-test": anState.test = v; anState.cmp = null; render(); break;
+    case "jcmp": { const s = anState.jcmp || [], i = s.indexOf(id); if (i >= 0) { if (s.length > 1) s.splice(i, 1); } else if (s.length >= 6) toast("Up to six athletes."); else s.push(id); anState.jcmp = s; render(); break; }
+    case "jcmp-report": { const ids = (anState.jcmp || []).filter((x) => jumps.some((j) => j.athleteId === x)); if (ids.length > 1) openJumpCompareReport(ids); else toast("Pick at least two athletes to compare."); break; }
     case "an-cmp": { const s = anState.cmp || [], i = s.indexOf(id); if (i >= 0) { if (s.length > 1) s.splice(i, 1); } else if (s.length >= 4) toast("Up to four athletes on the chart."); else s.push(id); anState.cmp = s; render(); break; }
     case "ath-new": nav("athlete", null); break;
     case "ath-edit": nav("athlete", id); break;

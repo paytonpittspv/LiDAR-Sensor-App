@@ -3686,11 +3686,17 @@ function jumpAnalyticsHTML(mine) {
       <div class="small muted" style="margin:8px 0 ${ch ? 4 : 0}px">Time to takeoff: from starting the dip to leaving the ground (average ${avgT.toFixed(2)} s): shorter is snappier. RSImod: jump height ÷ that time, so it rewards height from a quick dip, not a big slow one.${jkg(anState.athleteId) ? "" : " Add body weight for watts."}</div>
       ${ch ? `<div class="label" style="margin-top:6px">Best RSImod per day</div>${ch}` : ""}</div>`;
   }
-  // everyone's best, as bars
-  const tops = athletes.map((a) => ({ a, j: jumps.filter((j) => j.athleteId === a.id).reduce((b, j) => (!b || j.h > b.h ? j : b), null) })).filter((x) => x.j).sort((x, y) => y.j.h - x.j.h);
-  if (tops.length > 1) {
-    const mx = tops[0].j.h;
-    h += `<div class="card"><div class="label" style="margin-bottom:8px">Everyone's best · takeoff to peak</div>${tops.map(({ a, j }) => `<div class="jrank${a.id === anState.athleteId ? " me" : ""}" data-act="an-ath" data-id="${a.id}"><span class="nm">${esc(a.name)}</span><span class="bar"><b style="width:${((100 * j.h) / mx).toFixed(1)}%"></b></span><span class="v">${cm(j.h)}</span></div>`).join("")}</div>`;
+  // compare: pick who (up to six), ranked bars, print the group report
+  const withJ = athletes.filter((x) => jumps.some((j) => j.athleteId === x.id));
+  if (withJ.length > 1) {
+    if (!anState.jcmp) anState.jcmp = withJ.slice(0, 6).map((x) => x.id);
+    const sel = anState.jcmp.filter((id) => withJ.some((x) => x.id === id));
+    const tops = sel.map((id) => ({ a: athletes.find((x) => x.id === id), j: jumps.filter((j) => j.athleteId === id).reduce((b, j) => (!b || j.h > b.h ? j : b), null) })).filter((x) => x.j).sort((x, y) => y.j.h - x.j.h);
+    const mx = tops.length ? tops[0].j.h : 1;
+    h += `<div class="card"><div class="between"><div class="label">Compare athletes · best takeoff to peak</div><span class="small muted">cm</span></div>
+      <div class="chips" style="margin:8px 0 10px">${withJ.map((x) => `<button class="chip" data-act="jcmp" data-id="${x.id}" aria-pressed="${sel.includes(x.id)}">${esc(firstName(x.id))}</button>`).join("")}</div>
+      ${tops.map(({ a, j }) => `<div class="jrank${a.id === anState.athleteId ? " me" : ""}" data-act="an-ath" data-id="${a.id}"><span class="nm">${esc(a.name)}</span><span class="bar"><b style="width:${((100 * j.h) / mx).toFixed(1)}%"></b></span><span class="v">${cm(j.h)}</span></div>`).join("")}
+      <button class="btn" style="width:100%;margin-top:10px" data-act="jcmp-report" ${sel.length > 1 ? "" : "disabled"}>Print group comparison (PDF)</button></div>`;
   }
   h += `<h2>Jumps</h2><div class="card tw"><table class="jtab"><thead><tr><th>When</th><th>Height</th><th>Mat</th><th>Time</th><th>RSI</th><th></th></tr></thead><tbody>${mine.slice(0, 60).map((j) => `<tr>
     <td style="white-space:nowrap"><b>${dayLabel(dayKey(j.ts))}</b><div class="small muted">${timeLabel(j.ts)}${j.sim ? " sim" : ""}</div></td>
@@ -3902,6 +3908,8 @@ document.addEventListener("click", (e) => {
     case "an-ath": anState.athleteId = id; if (!(anState.test === "jump" ? jumps.some((j) => j.athleteId === id) : runs.some((r) => r.athleteId === id && testKey(r) === anState.test))) anState.test = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); break;
     case "mid-out": settings.midOut = +v; saveSettings(); render(); break;
     case "an-test": anState.test = v; anState.cmp = null; render(); break;
+    case "jcmp": { const s = anState.jcmp || [], i = s.indexOf(id); if (i >= 0) { if (s.length > 1) s.splice(i, 1); } else if (s.length >= 6) toast("Up to six athletes."); else s.push(id); anState.jcmp = s; render(); break; }
+    case "jcmp-report": { const ids = (anState.jcmp || []).filter((x) => jumps.some((j) => j.athleteId === x)); if (ids.length > 1) openJumpCompareReport(ids); else toast("Pick at least two athletes to compare."); break; }
     case "an-cmp": { const s = anState.cmp || [], i = s.indexOf(id); if (i >= 0) { if (s.length > 1) s.splice(i, 1); } else if (s.length >= 4) toast("Up to four athletes on the chart."); else s.push(id); anState.cmp = s; render(); break; }
     case "ath-new": nav("athlete", null); break;
     case "ath-edit": nav("athlete", id); break;
@@ -4623,6 +4631,103 @@ function compareReport(test, ids) {
 function openCompareReport(test, ids) {
   const el = $("#report");
   el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + compareReport(test, ids);
+  el.classList.remove("hidden"); el.scrollTop = 0;
+  layoutReport(el);
+}
+
+// ---------- vertical jump group comparison (Analytics > Vertical jump > Compare > Print) ----------
+const JCMP_COLORS = [ACC, ACC2, ACC3, "#e08a00", "#16a34a", "#0f766e"];
+function jumpStats(aid) {
+  const js = jumps.filter((j) => j.athleteId === aid).sort((x, y) => x.ts - y.ts), a = athleteById(aid), H = js.map((j) => j.h);
+  const xs = js.filter((j) => j.tto != null), max = (l, k) => (l.length ? l.reduce((b, j) => (j[k] > b[k] ? j : b)) : null);
+  return { aid, name: a.name, kg: a.kg || null, js, n: js.length, best: max(js, "h"), bestS: max(js.filter((j) => j.hStand != null), "hStand"), avg: avgOf(H), sd: sdOf(H),
+    fast: xs.length ? xs.reduce((b, j) => (j.tto < b.tto ? j : b)) : null, avgT: xs.length ? avgOf(xs.map((j) => j.tto)) : null, rsi: max(xs, "rsi"), avgR: xs.length ? avgOf(xs.map((j) => j.rsi)) : null, pw: max(xs, "pwKg"),
+    avgH: avgOf(H), days: [...new Set(js.map((j) => dayKey(j.ts)))] };
+}
+function jumpCompareReport(ids) {
+  const A = ids.map(jumpStats).filter((o) => o.best).sort((x, y) => y.best.h - x.best.h);
+  const col = {}; A.forEach((o, i) => (col[o.aid] = JCMP_COLORS[i % JCMP_COLORS.length]));
+  const all = A.flatMap((o) => o.js), t0 = Math.min(...all.map((j) => j.ts)), t1 = Math.max(...all.map((j) => j.ts));
+  const dfmt = (ts) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const head = `<div class="rhead"><span>LiDAR SENSOR</span><span>VERTICAL JUMP · GROUP COMPARISON</span></div>`;
+  const dot = (aid, s = 9) => `<span class="cdot" style="width:${s}px;height:${s}px;background:${col[aid]}"></span>`;
+  const m = (k, v, u, sub, cls) => `<div class="m ${cls || ""}"><div class="k">${k}</div><div class="v">${v}${u ? `<small>${u}</small>` : ""}</div>${sub ? `<div class="k" style="margin-top:2px">${sub}</div>` : ""}</div>`;
+  const POD = "LiDAR Sensor app · waist pod · BMI160 · 1600 readings per second";
+  const lead = A[0], lastA = A[A.length - 1], X = A.filter((o) => o.rsi), rLead = X.slice().sort((p, q) => q.rsi.rsi - p.rsi.rsi)[0], tLead = X.slice().sort((p, q) => p.fast.tto - q.fast.tto)[0];
+  const steady = A.filter((o) => o.sd != null).sort((p, q) => p.sd - q.sd)[0];
+  const pwr = (o) => (o.pw ? (o.kg ? `${Math.round(o.pw.pwKg * o.kg).toLocaleString()} W` : `${o.pw.pwKg.toFixed(1)} W/kg`) : "–");
+  // ranking by best takeoff to peak
+  const lo = Math.max(0, Math.floor((lastA.best.h * 100 - 4) / 2) * 2), hi = lead.best.h * 100;
+  const rank = A.map((o, i) => `<div class="crank"><span class="n">${i + 1}</span><span class="nm">${dot(o.aid)}${esc(o.name)}<small>${o.n} jump${o.n > 1 ? "s" : ""} · avg ${cmF(o.avg)} cm</small></span>
+      <span class="barbg"><i style="width:${(8 + 92 * ((o.best.h * 100 - lo) / Math.max(0.1, hi - lo))).toFixed(1)}%;background:${col[o.aid]}"></i></span>
+      <b>${cmF(o.best.h)}<small> cm</small></b><span class="gap">${i ? ((o.best.h - lead.best.h) * 100).toFixed(1) : "leader"}</span></div>`).join("");
+  // best per session, one line each
+  const days = [...new Set(all.map((j) => dayKey(j.ts)))].sort(), dx = (k) => (new Date(k).getTime() - new Date(days[0]).getTime()) / 864e5, xEnd = Math.max(1, dx(days[days.length - 1]));
+  let ylo = 1e9, yhi = -1e9; const series = [], dots = [];
+  for (const o of A) {
+    const by = {}; for (const j of o.js) { const k = dayKey(j.ts); by[k] = Math.max(by[k] || 0, j.h * 100); }
+    const ds = Object.keys(by).sort(), XX = ds.map(dx), Y = ds.map((d) => by[d]);
+    Y.forEach((y) => { ylo = Math.min(ylo, y); yhi = Math.max(yhi, y); });
+    series.push({ x: XX, y: Y, color: col[o.aid], w: 2.2 }); XX.forEach((x, k) => dots.push({ x, y: Y[k], r: 3.4, fill: "#fff", stroke: col[o.aid], sw: 1.8 }));
+  }
+  const pad = Math.max(1, (yhi - ylo) * 0.2), ya = ylo - pad, yb = yhi + pad, yt = niceTicks(ya, yb, 5).filter((t) => t >= ya && t <= yb);
+  const xt = []; { const n = Math.min(6, days.length); for (let i = 0; i < n; i++) xt.push(n === 1 ? 0 : (xEnd * i) / (n - 1)); }
+  const trend = svgChart({ aria: "Best jump per session", w: 730, h: 160, pad: [44, 14, 10, 34], x0: -0.4, x1: xEnd + 0.4, y0: ya, y1: yb, font: 11, textColor: INK2, gridColor: "#efecf6",
+    xt, xfmt: (t) => new Date(new Date(days[0]).getTime() + t * 864e5 + 12 * 36e5).toLocaleDateString([], { month: "short", day: "numeric" }), yt, yfmt: (t) => t.toFixed(0), yl: "cm", series, dots });
+  const lg = legend(A.map((o) => [SW_LINE(col[o.aid], 2.5), esc(o.name)]));
+  // takeaways
+  const notes = [];
+  if (A.length > 1) notes.push(`${B(esc(lead.name))} jumps highest: ${B(cmF(lead.best.h) + " cm")} takeoff to peak, ${((lead.best.h - A[1].best.h) * 100).toFixed(1)} cm ahead of ${esc(A[1].name)}.`);
+  if (rLead && X.length > 1) notes.push(`Most explosive: ${B(esc(rLead.name))}, RSImod ${rLead.rsi.rsi.toFixed(2)}${rLead.aid !== lead.aid ? ` (more height per second on the ground than ${esc(lead.name)}, who jumps higher)` : ""}.`);
+  if (tLead && X.length > 1) notes.push(`Quickest off the ground: ${B(esc(tLead.name))}, ${tLead.fast.tto.toFixed(2)} s from starting the dip to takeoff${tLead.avgT ? ` (average ${tLead.avgT.toFixed(2)} s)` : ""}.`);
+  const slow = X.filter((o) => o.avgT != null).sort((p, q) => q.avgT - p.avgT)[0];
+  if (slow && tLead && slow.aid !== tLead.aid && slow.avgT - tLead.avgT > 0.08) notes.push(`${esc(slow.name)} takes the longest (${slow.avgT.toFixed(2)} s on average): a big, slow dip. Worth trying shorter, quicker countermovements.`);
+  if (steady && A.length > 1) notes.push(`Most repeatable: ${B(esc(steady.name))}, ±${cmF(steady.sd)} cm jump to jump.`);
+  const p1 = `<div class="page">${head}
+    <div class="box btop">${brandBlock(`Vertical jump · group comparison<br>Waist pod · BMI160 · 1600 Hz · <b style="color:${INK}">±0.3 cm calibrated</b>`)}
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:12px;gap:12px;flex-wrap:wrap">
+        <div><div class="eyebrow">COMPARISON · VERTICAL JUMP</div><div class="who" style="font-size:${A.length > 3 ? 22 : 28}px">${A.map((o) => esc(o.name)).join(` <span style="color:${INK2};font-weight:400;font-size:16px">vs</span> `)}</div></div>
+        <div style="color:${INK2};font-size:13px;text-align:right">${dfmt(t0)}${dayKey(t0) !== dayKey(t1) ? ` – ${dfmt(t1)}` : ""}<br>${all.length} jumps · ${days.length} session${days.length > 1 ? "s" : ""}</div></div>
+      <div class="metrics" style="grid-template-columns:1.35fr 1fr 1fr 1fr">
+        <div class="m hero" style="grid-row:auto"><div class="k">Highest · takeoff to peak</div><div class="v" style="font-size:40px">${cmF(lead.best.h)}<small style="font-size:16px">cm</small></div><div class="k">${dot(lead.aid, 8)} ${esc(lead.name)} · ${dfmt(lead.best.ts)}</div></div>
+        ${m("Best RSImod", rLead ? rLead.rsi.rsi.toFixed(2) : "—", "", rLead ? `${dot(rLead.aid, 7)}${esc(rLead.name)}` : "")}
+        ${m("Fastest takeoff time", tLead ? tLead.fast.tto.toFixed(2) : "—", tLead ? "s" : "", tLead ? `${dot(tLead.aid, 7)}${esc(tLead.name)}` : "")}
+        ${m("Most repeatable", steady ? `<span style="font-size:${steady.name.length > 12 ? 17 : 22}px">${esc(steady.name)}</span>` : "—", "", steady ? `±${cmF(steady.sd)} cm jump to jump` : "", "hl")}
+      </div></div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Ranking · best takeoff to peak</h4><span style="color:${INK2};font-size:11px">gap to the leader, cm</span></div>${rank}</div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Best jump per session</h4><span style="color:${INK2};font-size:11px">takeoff to peak, cm</span></div>${trend}${lg}</div>
+    <div class="box"><h4>Key takeaways</h4><ul class="sum">${notes.slice(0, 5).map((n) => `<li>${n}</li>`).join("")}</ul></div>
+    ${footer(1, 2, POD)}</div>`;
+  // page 2: fast vs high (each athlete's average: takeoff time across, height up), and the full numbers
+  let quad = "";
+  if (X.length > 1) {
+    const xsA = X.map((o) => o.avgT), ysA = X.map((o) => o.avgH * 100), mxT = avgOf(xsA), myH = avgOf(ysA);
+    const tlo = Math.min(...xsA), thi = Math.max(...xsA), hlo = Math.min(...ysA), hhi = Math.max(...ysA), tp = Math.max(0.03, (thi - tlo) * 0.25), hp = Math.max(1.5, (hhi - hlo) * 0.25);
+    const x0 = tlo - tp, x1 = thi + tp, qa = hlo - hp, qb = hhi + hp, ytq = niceTicks(qa, qb, 4).filter((t) => t >= qa && t <= qb);
+    const dq = X.map((o) => ({ x: o.avgT, y: o.avgH * 100, r: 6.5, fill: col[o.aid], stroke: "#fff", sw: 1.6 }));
+    const ch = svgChart({ aria: "Height vs takeoff time", w: 430, h: 250, pad: [44, 14, 10, 34], x0, x1, y0: qa, y1: qb, font: 11, textColor: INK2, gridColor: "#efecf6",
+      xt: niceTicks(x0, x1, 4).filter((t) => t >= x0 && t <= x1), xfmt: (t) => t.toFixed(2) + " s", yt: ytq, yfmt: (t) => t.toFixed(0), yl: "cm",
+      series: [{ x: [mxT, mxT], y: [qa, qb], color: "#c9c3dd", w: 1, dash: "4 4" }, { x: [x0, x1], y: [myH, myH], color: "#c9c3dd", w: 1, dash: "4 4" }], dots: dq });
+    quad = `<div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Fast and high</h4><span style="color:${INK2};font-size:11px">each athlete's average jump</span></div>
+      <div style="display:grid;grid-template-columns:430px 1fr;gap:18px;align-items:center">${ch}
+        <div style="font-size:12px;line-height:1.55;color:${INK}"><b>Top left</b> is where you want to be: high jumps from a quick dip.<br><b>Top right:</b> high, but slow to get off the ground.<br><b>Bottom left:</b> quick, but not much height yet.<br><b>Bottom right:</b> slow and low.<br><span style="color:${INK2}">Dashed lines are the group's averages.</span>
+        <div style="margin-top:8px">${X.map((o) => `<div>${dot(o.aid)}${esc(o.name)}</div>`).join("")}</div></div></div></div>`;
+  }
+  const tbl = `<table class="ctab"><thead><tr><th>Athlete</th><th>Jumps</th><th>Best</th><th>Average</th><th>Standing</th><th>Jump mat</th><th>Takeoff time</th><th>RSImod</th><th>Peak power</th></tr></thead><tbody>
+    ${A.map((o) => `<tr><td style="white-space:nowrap">${dot(o.aid, 8)}${esc(o.name)}</td><td>${o.n}</td><td class="${o.aid === lead.aid ? "lead" : ""}">${cmF(o.best.h)}</td><td>${cmF(o.avg)}${o.sd != null ? ` <span style="color:${INK2}">±${cmF(o.sd)}</span>` : ""}</td>
+      <td>${o.bestS ? cmF(o.bestS.hStand) : "–"}</td><td>${o.best.hFlight != null ? cmF(o.best.hFlight) : "–"}</td>
+      <td class="${tLead && o.aid === tLead.aid ? "lead" : ""}">${o.fast ? o.fast.tto.toFixed(2) + " s" : "–"}${o.avgT ? ` <span style="color:${INK2}">(${o.avgT.toFixed(2)})</span>` : ""}</td>
+      <td class="${rLead && o.aid === rLead.aid ? "lead" : ""}">${o.rsi ? o.rsi.rsi.toFixed(2) : "–"}</td><td>${pwr(o)}</td></tr>`).join("")}</tbody></table>`;
+  const p2 = `<div class="page">${head}
+    ${quad}
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>All the numbers</h4><span style="color:${INK2};font-size:11px">cm unless noted · best in pink</span></div>${tbl}</div>
+    <div style="color:${INK2};font-size:11px;line-height:1.5;margin-top:4px">Best / Average: takeoff to peak (how far the hips rise after leaving the ground). Standing: standing to peak (like a jump-and-reach test). Jump mat: what a jump mat would show for the best jump. Takeoff time: fastest, with the average in brackets, from starting the dip to leaving the ground. RSImod: jump height ÷ takeoff time. Peak power: watts with body weight, otherwise W/kg.</div>
+    ${footer(2, 2, POD)}</div>`;
+  return p1 + p2;
+}
+function openJumpCompareReport(ids) {
+  const el = $("#report");
+  el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + jumpCompareReport(ids);
   el.classList.remove("hidden"); el.scrollTop = 0;
   layoutReport(el);
 }
