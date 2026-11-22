@@ -1420,7 +1420,8 @@ function jumpHTML() {
   const mine = jumps.filter((j) => j.athleteId === pod.athleteId && dayKey(j.ts) === dayKey(Date.now()));
   const best = mine.reduce((b, j) => (!b || j.h > b.h ? j : b), null), last = mine[0];
   let h = `<button class="btn sm" data-act="back">‹ Back</button><h1 style="margin-top:10px">Jump test</h1>`;
-  h += `<div class="card"><div class="field" style="margin:0"><label for="jumpWho">Who's jumping</label><select id="jumpWho">${athletes.map((a) => `<option value="${a.id}" ${a.id === pod.athleteId ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></div>
+  h += `<div class="card">${athletes.length ? `<div class="field" style="margin:0"><label for="jumpWho">Who's jumping</label><select id="jumpWho">${athletes.map((a) => `<option value="${a.id}" ${a.id === pod.athleteId ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></div>`
+    : `<div class="between"><div><b>Who's jumping</b><div class="small muted">No athletes yet.</div></div><button class="btn" data-act="ath-new">+ Add athlete</button></div>`}
     <div class="small" style="margin-top:8px">${podStatusLine()}</div></div>`;
   h += `<div class="card tint"><div class="label">How</div><ol class="steps small" style="margin:6px 0 0">
     <li>Pod on the strap, snug, at the low back.</li><li><b>Stand still</b> for a second.</li><li>Jump (countermovement, hands on hips or free).</li><li>Land and <b>stand still</b> for a second. The height shows up here.</li></ol></div>`;
@@ -1576,7 +1577,8 @@ function wizardHTML() {
   if (cap.step === "event") {
     const tile = (v, name, sub, icon) => `<button class="tile" data-act="cap-mode" data-v="${v}" aria-pressed="${cap.mode === v}">${icon}<b>${name}</b><span>${sub}</span></button>`;
     h += `<div class="tiles">${tile("sprint", "Sprint", "Top speed, splits and the fastest flying 10 m", `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4a1.5 1.5 0 1 0 0 .01"/><path d="M7 21l3-6 3 2v5M10 15l1-5 4 2 3-1M11 10l-3 1-2 3"/></svg>`)}
-      ${tile("vault", "Vault", "Lefts, top speed and the last 5 m into the box", `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21L20 4"/><path d="M8 21l3-5 3 1"/><path d="M12 9.5a1.5 1.5 0 1 0 0 .01"/></svg>`)}</div>`;
+      ${tile("vault", "Vault", "Lefts, top speed and the last 5 m into the box", `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21L20 4"/><path d="M8 21l3-5 3 1"/><path d="M12 9.5a1.5 1.5 0 1 0 0 .01"/></svg>`)}
+      <button class="tile" data-act="go-jump"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5a1.5 1.5 0 1 0 0 .01"/><path d="M8 11l4-3 4 3M12 8v6l-3 4M12 14l3 4"/><path d="M4 21h16"/><path d="M19 4v6M17 6l2-2 2 2"/></svg><b>Vertical jump</b><span>Jump height from the waist pod</span></button></div>`;
   } else if (cap.step === "distance" && !vault) {
     h += `<div class="label" style="margin-bottom:8px">Stop at</div><div class="bigchips">${[10, 20, 30, 40, 60].map((d) => `<button class="chip big" data-act="cap-target" data-v="${d}" aria-pressed="${cap.target === d}">${d} m</button>`).join("")}</div>
       <div class="row" style="gap:8px;margin-top:12px"><input type="number" id="customTarget" inputmode="numeric" min="5" max="80" placeholder="Other distance" style="flex:1" value="${[10, 20, 30, 40, 60].includes(cap.target) ? "" : cap.target}"><span class="muted">m</span><button class="btn" data-act="cap-target-custom">Next</button></div>
@@ -1995,7 +1997,7 @@ function render() {
   const ph = view + ":" + cap.phase; if (runOn && ph !== render.last) window.scrollTo(0, 0); render.last = ph;
   const lu = $("#lineup"); if (lu) rosterDrag(lu, lineupDrop, luDrag, "id");
   lcDrawAll(); liveDraw(); LC = Object.fromEntries(Object.entries(LC).filter(([k]) => document.querySelector(`[data-lc="${k}"]`)));
-  const tab = { home: "home", new: "new", run: "sessions", sessions: "sessions", session: "sessions", compare: "analytics", analytics: "analytics", settings: "settings", athlete: "settings", level: "settings", jump: "home", podcal: "settings" }[view];
+  const tab = { home: "home", new: "new", run: "sessions", sessions: "sessions", session: "sessions", compare: "analytics", analytics: "analytics", settings: "settings", athlete: "settings", level: "settings", jump: "new", podcal: "settings" }[view];
   document.querySelectorAll(".tabbar [data-go]").forEach((b) => (b.dataset.go === tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
   const sw = $("#soloSw"); if (sw) sw.onchange = () => { settings.solo = sw.checked; saveSettings(); if (sw.checked) unlockAudio(); };
   const vs = $("#voiceSw"); if (vs) vs.onchange = () => { settings.voice = vs.checked; saveSettings(); unlockAudio(); if (vs.checked) say("Voice on"); };
@@ -2088,7 +2090,7 @@ document.addEventListener("click", (e) => {
         // added while setting up a run: put them in the lineup
         const from = backStack[backStack.length - 1];
         if (from && from[0] === "new" && cap.phase === "setup") { if (!cap.queue.includes(a.id)) cap.queue.push(a.id); cap.athleteId = cap.queue[0]; settings.lastQueue = cap.queue.slice(); }
-        else cap.athleteId = a.id;
+        else { cap.athleteId = a.id; if (from && from[0] === "jump") pod.athleteId = a.id; }
         settings.lastAthlete = cap.athleteId; saveSettings();
       }
       saveAthletes(); toast("Saved"); back(); break;
