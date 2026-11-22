@@ -5,7 +5,7 @@
 // A small copy also goes in localStorage (settings, athletes, the session and the 3 newest runs), written
 // instantly, so even a refresh in the split second before the database finishes can't lose a run.
 const Store = (() => {
-  const NAME = "paytons-lidar", OS = "kv", KEYS = ["athletes", "runs", "settings", "session"], SMALL = ["athletes", "settings", "session"];
+  const NAME = "paytons-lidar", OS = "kv", KEYS = ["athletes", "runs", "settings", "session", "jumps"], SMALL = ["athletes", "settings", "session"];
   const cache = {}; let db = null, mode = "local", persisted = null, usage = null, quota = null, onError = () => {};
   const ls = {
     get(k) { try { const v = localStorage.getItem("pls." + k); return v == null ? undefined : JSON.parse(v); } catch (e) { return undefined; } },
@@ -34,13 +34,15 @@ const Store = (() => {
         for (const k of SMALL) { const l = ls.get(k); cache[k] = l !== undefined ? l : got[k]; }
         // old saved runs (from before the database) and the instant copy of the newest runs are folded in
         cache.runs = merge(got.runs, ls.get("runs"), ls.get("recent"));
+        cache.jumps = merge(got.jumps, ls.get("jumps"));
         await run("readwrite", (s) => { for (const k of KEYS) if (cache[k] !== undefined) s.put(cache[k], k); });
-        ls.del("runs");   // now safely in the database, which frees the old storage
+        ls.del("runs"); ls.del("jumps");   // now safely in the database, which frees the old storage
       } catch (e) { db = null; mode = "local"; }
     }
     if (mode === "local") {
       for (const k of SMALL) cache[k] = ls.get(k);
       cache.runs = merge(ls.get("runs"), ls.get("recent"));
+      cache.jumps = ls.get("jumps");
     }
     refreshInfo(true);
   }
@@ -57,7 +59,7 @@ const Store = (() => {
     if (SMALL.includes(k)) ls.set(k, v);
     if (k === "runs") ls.set("recent", v.slice(0, 3));
     if (mode === "local") {
-      if (k === "runs" && !ls.set("runs", v)) { onError({ name: "QuotaExceededError" }); return false; }
+      if ((k === "runs" || k === "jumps") && !ls.set(k, v)) { onError({ name: "QuotaExceededError" }); return false; }
       return true;
     }
     write(k, true);
