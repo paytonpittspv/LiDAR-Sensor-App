@@ -658,7 +658,7 @@ function drawDisplay() {
   if (key !== disp.rosterKey && !disp.dragging) {
     disp.rosterKey = key;
     rs.hidden = !mode; rs.className = `d-roster ${mode}`;
-    rs.innerHTML = mode ? `<div class="d-label">${mode === "pop" ? (sName === "result" ? "WHO\u2019S UP NEXT?" : "WHO\u2019S UP?") : "TAP TO PICK \u00b7 DRAG \u2261 TO MOVE"}</div>` +
+    rs.innerHTML = mode ? `<div class="d-label">${mode === "pop" ? (sName === "result" ? "WHO\u2019S UP NEXT?" : "WHO\u2019S UP?") : "TAP TO PICK \u00b7 HOLD &amp; DRAG TO MOVE"}</div>` +
       names.map((n, i) => (i === lineup && lineup > 0 ? `<div class="d-div">NOT IN TODAY\u2019S LINEUP</div>` : "") +
         `<button data-d="pick" data-name="${E(n)}" class="${n === cur ? "on" : ""}"><span class="nm">${E(n)}</span><span class="d-grip" data-d="grip" aria-label="Drag to move">\u2261</span></button>`).join("") : "";
     if (!rs.dataset.drag) { rs.dataset.drag = "1"; rosterDrag(rs, (order, lu) => {
@@ -676,18 +676,33 @@ function drawDisplay() {
     fit.style.fontSize = `${Math.floor(100 * k * 0.97)}px`;
   }
 }
-// drag a name by its \u2261 handle to move it up or down the roster (and across the lineup line)
+// rearrange the roster: hold a name anywhere (or grab its \u2261 straight away) and drag it up or down (also across the lineup line)
 function rosterDrag(rs, onDrop, st = disp, attr = "name") {
-  let d = null;
+  let d = null, hold = null, eat = false;
   const items = () => [...rs.children].filter((c) => c.tagName === "BUTTON" || c.classList.contains("d-div"));
+  const start = (it, e) => {
+    d = { it, y: e.clientY, moved: false, gap: parseFloat(getComputedStyle(rs).rowGap) || 0 };
+    st.dragging = true; it.classList.add("drag"); eat = true;
+    try { it.setPointerCapture(e.pointerId); } catch (x) {}
+    try { navigator.vibrate && navigator.vibrate(12); } catch (x) {}
+  };
+  const cancelHold = () => { if (hold) { clearTimeout(hold.t); hold = null; } };
   rs.addEventListener("pointerdown", (e) => {
-    const g = e.target.closest(".d-grip"); if (!g) return;
-    e.preventDefault();
-    const it = g.closest("button"); d = { it, y: e.clientY, moved: false, gap: parseFloat(getComputedStyle(rs).rowGap) || 0 };
-    st.dragging = true; it.classList.add("drag");
-    try { g.setPointerCapture(e.pointerId); } catch (x) {}
+    const it = e.target.closest("button"); if (!it || !rs.contains(it) || it.parentElement !== rs) return;
+    eat = false;
+    if (e.target.closest(".d-grip")) { e.preventDefault(); start(it, e); return; }
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    // anywhere else on the card: a short hold picks it up; moving first means scrolling, so it lets go
+    cancelHold();
+    hold = { x: e.clientX, y: e.clientY, t: setTimeout(() => { hold = null; start(it, e); }, 300) };
   });
+  // once a name is picked up, the page must not scroll under the finger
+  rs.addEventListener("touchmove", (e) => { if (d) e.preventDefault(); }, { passive: false });
+  rs.addEventListener("contextmenu", (e) => { if (d || hold) e.preventDefault(); });
+  // a drag (or a hold) isn't a tap
+  rs.addEventListener("click", (e) => { if (eat) { e.stopPropagation(); e.preventDefault(); eat = false; } }, true);
   rs.addEventListener("pointermove", (e) => {
+    if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) cancelHold();
     if (!d) return;
     // near the top or bottom edge: scroll the list along
     const box = rs.getBoundingClientRect(), edge = 50;
@@ -702,9 +717,11 @@ function rosterDrag(rs, onDrop, st = disp, attr = "name") {
     dy = e.clientY - d.y; d.it.style.transform = `translateY(${dy}px)`;
   });
   const end = () => {
+    cancelHold();
     if (!d) return;
     const { it, moved } = d; d = null; st.dragging = false;
     it.style.transform = ""; it.classList.remove("drag");
+    setTimeout(() => (eat = false), 400);
     if (!moved) return;
     const list = items(), order = list.filter((c) => c.tagName === "BUTTON").map((c) => c.dataset[attr]);
     const div = list.findIndex((c) => c.classList.contains("d-div"));
@@ -1443,7 +1460,7 @@ function jumpHTML() {
     h += `<div class="card"><div class="between"><div class="label">Last jump · ${esc(athleteById(last.athleteId).name)}${last.sim ? " · simulated" : ""}</div></div><div class="jump-big">${fmtJump(last.h)}<small>${jumpUnit()}</small></div>
       <div class="small muted">${fmtJumpAlt(last.h)} · flight time ${last.t.toFixed(3)} s says ${fmtJump(last.hFlight)} ${jumpUnit()}${last.agree ? "" : " · <b style=\"color:var(--warn)\">the two disagree: probably landed with bent knees</b>"}${last.cal ? "" : " · pod not calibrated"}</div></div>`;
   }
-  if (athletes.length) h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · drag ≡ to change the order</span></div>${lineupHTML("run")}`;
+  if (athletes.length) h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · hold &amp; drag to move</span></div>${lineupHTML("run")}`;
   h += `<button class="lu-add" data-act="ath-new">+ Add athlete</button>`;
   if (today.length) {
     const best = {}; today.forEach((j) => { if (!best[j.athleteId] || j.h > best[j.athleteId]) best[j.athleteId] = j.h; });
@@ -1624,7 +1641,7 @@ function wizardHTML() {
     const what = vault ? SETUPS[cap.setup].name : `${cap.target} m sprint`, q = cap.queue.filter((id) => athletes.some((a) => a.id === id));
     h += `<div class="ev-sum"><div><div class="label">Event</div><b>${esc(what)}</b></div><button class="btn sm" data-act="wiz-edit">Change</button></div>`;
     if (!athletes.length) h += `<div class="card"><div class="muted small" style="margin-bottom:8px">Add who's running first.</div><button class="btn" data-act="ath-new">Add athlete</button></div>`;
-    else h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap to add or take off · drag ≡ to change the order</span></div>${lineupHTML("setup")}<button class="lu-add" data-act="ath-new">+ Add athlete</button>`;
+    else h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap to add or take off · hold &amp; drag to move</span></div>${lineupHTML("setup")}<button class="lu-add" data-act="ath-new">+ Add athlete</button>`;
     h += `<div class="small muted" style="text-align:center;margin-top:14px">Hands Free Mode is <b>${settings.solo ? "on" : "off"}</b> · chime, voice and Hands Free are in <a href="#" data-go="settings">Settings</a></div>`;
     h += `<div class="dock"><button class="btn primary" data-act="cap-ready" ${q.length ? "" : "disabled"}>${!q.length ? "Tap who's running" : q.length === 1 ? `Get ready · ${esc(firstName(q[0]))}` : `Get ready · ${q.length} taking turns`}</button></div>`;
   }
@@ -1642,7 +1659,7 @@ function newHTML() {
   };
   const sessLine = () => { if (!cap.session) return ""; const n = cap.session.ids.length, mins = Math.max(0, Math.round((Date.now() - cap.session.start) / 60000));
     return `<div class="sessline"><span><b>Session</b> · ${n} run${n === 1 ? "" : "s"} saved · ${mins} min</span><button class="btn sm" data-act="cap-end">End session</button></div>`; };
-  const lineup = () => (athletes.length > 1 ? `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · drag ≡ to change the order</span></div>${lineupHTML("run")}<div style="height:8px"></div>` : "");
+  const lineup = () => (athletes.length > 1 ? `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · hold &amp; drag to move</span></div>${lineupHTML("run")}<div style="height:8px"></div>` : "");
   const stage = (color, left, right, body, cls = "") => `<section class="stage ${cls}"><div class="st-strip ${color}"><span>${left}</span><span>${right}</span></div><div class="st-body">${body}</div></section>`;
   const dist = `<span data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</span> m`;
   if (cap.phase === "waiting") {
@@ -1678,7 +1695,7 @@ function cueHTML() {
   return `<div class="st-cue">${cap.mode === "sprint" ? "Stand still within 5 m to arm" : "Stand still on your mark to arm"}</div>`;
 }
 // The lineup, like the big display's roster: today's order above the line, everyone else below it.
-//   setup: tap adds or takes someone off · during a run: tap = who's up now · both: drag ≡ to reorder, also across the line
+//   setup: tap adds or takes someone off · during a run: tap = who's up now · both: hold a name (or grab ≡) and drag to reorder, also across the line
 function lineupHTML(mode) {
   const q = cap.queue.filter((id) => athletes.some((a) => a.id === id));
   const rest = athletes.filter((a) => !q.includes(a.id)).sort((a, b) => a.name.localeCompare(b.name));
@@ -2062,7 +2079,7 @@ document.addEventListener("click", (e) => {
   const g = e.target.closest("[data-go]"); if (g) { backStack = []; if (g.dataset.go === "new") unlockAudio(); go(g.dataset.go); return; }
   const el = e.target.closest("[data-act]"); if (!el) return;
   const act = el.dataset.act, id = el.dataset.id, v = el.dataset.v;
-  if (act === "lu-tap") { if (!e.target.closest(".d-grip")) lineupTap(id); return; }
+  if (act === "lu-tap") { if (!e.target.closest(".d-grip") && !luDrag.dragging) lineupTap(id); return; }
   if (act === "cmp-toggle") { e.stopPropagation(); toggleCompare(id); return; }
   switch (act) {
     case "back": back(); break;
