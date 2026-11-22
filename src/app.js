@@ -1458,7 +1458,7 @@ function jumpHTML() {
   if (pod.lastRes && !pod.lastRes.ok && !pod.simming) h += `<div class="card"><b>${esc(pod.lastRes.why)}</b></div>`;
   if (last) {
     h += `<div class="card"><div class="between"><div class="label">Last jump · ${esc(athleteById(last.athleteId).name)}${last.sim ? " · simulated" : ""}</div></div><div class="jump-big">${fmtJump(last.h)}<small>${jumpUnit()}</small></div>
-      <div class="small muted">${fmtJumpAlt(last.h)} · flight time ${last.t.toFixed(3)} s says ${fmtJump(last.hFlight)} ${jumpUnit()}${last.agree ? "" : " · <b style=\"color:var(--warn)\">flight time differs because you landed lower than takeoff; the height doesn't depend on the landing</b>"}${last.cal ? "" : " · pod not calibrated"}</div></div>`;
+      <div class="small muted">${fmtJumpAlt(last.h)} · a jump mat would read ${fmtJump(last.hFlight)} ${jumpUnit()} (flight time ${last.t.toFixed(3)} s)${last.agree ? "" : " · <b style=\"color:var(--warn)\">flight time differs because you landed lower than takeoff; the height doesn't depend on the landing</b>"}${last.cal ? "" : " · pod not calibrated"}</div></div>`;
   }
   if (athletes.length) h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · hold &amp; drag to move</span></div>${lineupHTML("run")}`;
   h += `<button class="lu-add" data-act="ath-new">+ Add athlete</button>`;
