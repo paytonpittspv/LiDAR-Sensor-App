@@ -1857,11 +1857,27 @@ function compareAthletesCard(test) {
   const top = rows[0].best.v, low = rows[rows.length - 1].best.v, bw = (v) => (top === low ? 100 : 35 + 65 * ((v - low) / (top - low)));
   let h = `<div class="card"><div class="between"><div class="label">Compare athletes · ${testName(test)}</div><div class="small muted">ranked by best ${km.label}</div></div>${isSprint ? "" : `<div class="small muted" style="margin-top:4px">Carry = best last 5 m as a % of sprint top speed. TO ± = how much the takeoff spot moves.</div>`}
     <div class="chips" style="margin:10px 0 4px">${withRuns.map((a) => { const i = sel.indexOf(a.id); return `<button class="chip" data-act="an-cmp" data-id="${a.id}" aria-pressed="${i >= 0}">${i >= 0 ? `<span class="dot" style="background:${ANC[i]}"></span>` : ""}${esc(a.name)}</button>`; }).join("")}</div>`;
-  // overlaid trend: best key metric per day, one line per athlete
+  // speed curves: each selected athlete's best run, overlaid (lined up like Compare: from the start for sprints, at
+  // the takeoff for vaults)
+  const bestRuns = sel.map((id) => { const o = rows.find((x) => x.a.id === id); return o ? o.best.r : null; });
+  const shown = bestRuns.map((r, i) => ({ r, i })).filter((x) => x.r && x.r.res && x.r.res.curve);
+  if (shown.length) {
+    const vault = !isSprint, xs = shown.map(({ r }) => compareX(r));
+    const end = isSprint ? Math.max(...shown.map(({ r }) => r.target || 0)) : 0;
+    const cut = shown.map(({ r }, k) => { const lim = isSprint ? r.target : 0; let j = xs[k].findIndex((x) => x > lim + 0.05); if (j < 0) j = xs[k].length; return { x: xs[k].slice(0, j), y: r.res.curve.v.slice(0, j) }; });
+    const ymax = Math.ceil(Math.max(...shown.map(({ r }) => r.res.top.speed)) + 0.8);
+    const x0 = vault ? Math.max(Math.floor(Math.min(...xs.map((x) => x[0]))), -30) : 0;
+    h += lcSlot({ aria: "Speed curves of each athlete's best run", h: 230, x0, x1: vault ? 0 : end || Math.ceil(Math.max(...xs.map((x) => x[x.length - 1]))), y0: 0, y1: ymax,
+      xTitle: vault ? "Distance before takeoff (m)" : "Distance (m)", yUnit: "m/s", xfmt: (t) => `${Math.abs(t)}`, vlines: vault ? [{ x: -5, label: "5 m out" }] : [],
+      fmtPill: (x, vals) => vals.map((v, k) => (isFinite(v) ? `${esc(firstName(shown[k].r.athleteId))} ${f2(v)}` : "")).filter(Boolean).join("  ") + ` · ${f1(Math.abs(x))} m`,
+      series: cut.map((c, k) => ({ x: c.x, y: c.y, color: ANC[shown[k].i], w: 2.4 })) });
+    h += `<div class="small muted">Each athlete's best run (by ${km.label}). Drag across to read their speeds at the same spot.</div>`;
+  }
+  // overlaid trend: best key metric per day, one line per athlete (only once there's more than one day to show)
   const series = [], dots = [], allDays = new Set();
   const per = sel.map((id) => { const by = bestPerDay(runs.filter((r) => r.athleteId === id && testKey(r) === test), km.pick); Object.keys(by).forEach((d) => allDays.add(d)); return by; });
   const dl = [...allDays].sort();
-  if (dl.length) {
+  if (dl.length > 1) {
     const t0 = new Date(dl[0]).getTime(), dx = (d) => (new Date(d).getTime() - t0) / 864e5; let lo = 1e9, hi = -1e9;
     per.forEach((by, i) => { const ds = Object.keys(by).sort(), X = ds.map(dx), Y = ds.map((d) => by[d].v); Y.forEach((y) => { lo = Math.min(lo, y); hi = Math.max(hi, y); });
       series.push({ x: X, y: Y, color: ANC[i], w: 2.4 }); X.forEach((x, j) => dots.push({ x, y: Y[j], color: ANC[i], attrs: `data-act="open-run" data-id="${by[ds[j]].r.id}" style="cursor:pointer"` })); });
