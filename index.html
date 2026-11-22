@@ -2816,8 +2816,12 @@ function podStatusLine() {
 }
 // Settings card
 function podCardHTML() {
-  if (WEB_COPY) return "";
   const unit = lvImperial() ? "in" : "cm", v = lvImperial() ? Math.round(podRest() / 0.0254) : Math.round(podRest() * 100);
+  // this copy of the app can't reach the pod (it talks to the sensor): what works here, and where the rest lives
+  if (WEB_COPY) return `<div class="card"><div class="label">Waist pod</div>
+    <div class="small muted" style="margin:4px 0 10px">The pod talks to the sensor, so its status, calibration and updates are on the sensor's page (join the SpeedLidar Wi-Fi). The Jump test works here with simulated jumps.</div>
+    <div class="row" style="margin-bottom:10px"><button class="btn" data-act="go-jump">Jump test</button></div>
+    <div class="field" style="margin:0"><label for="podRest">Pod height lying on the mat (${unit})</label><input type="number" inputmode="decimal" id="podRest" value="${v}"></div></div>`;
   return `<div class="card"><div class="label">Waist pod</div>
     <div class="small" style="margin:4px 0 10px">${podStatusLine()}</div>
     <div class="row" style="margin-bottom:10px"><button class="btn" data-act="go-jump">Jump test</button><button class="btn" data-act="go-podcal">Calibrate</button><button class="btn ghost" data-act="pod-send">Send a test recording</button></div>
