@@ -814,7 +814,7 @@ String apiPodCmd(const Params& p) {
   return String("{\"ok\":") + (k ? "true" : "false") + ",\"online\":" + (on ? "true" : "false") + "}";
 }
 // a received body, in pieces: start (total size), write, end. Into PSRAM, for a pod's recording or for pod firmware.
-static bool podSinkBegin(PodSink& k, size_t total, bool firmware, const String& id = "") {
+static bool podSinkBegin(PodSink& k, size_t total, bool firmware, const String& id) {
   k.got = 0; k.ok = false; k.slot = -1;
   size_t cap = firmware ? pod::MAX_FW : pod::MAX_REC;
   if (!total || total > cap) return false;
@@ -846,15 +846,17 @@ static String podSinkEnd(PodSink& k, bool firmware) {
   s.len = k.got; s.seq++;
   return String("{\"ok\":true,\"seq\":") + s.seq + "}";
 }
-int phoneCount() { int n = WiFi.softAPgetStationNum(); for (auto& k : pod::s) if (k.id[0] && pod::online(k)) n--; return n < 0 ? 0 : n; }
 // a pod's status as JSON
-static void podJson(String& c, const pod::Slot& k) {
+namespace pod {   // (inside the namespace, so the Arduino builder doesn't put its prototype above the type)
+void json(String& c, const Slot& k) {
   char pj[300];
   snprintf(pj, sizeof pj, "{\"id\":\"%s\",\"on\":%s,\"fw\":\"%s\",\"imu\":%s,\"cal\":%s,\"sides\":%d,\"rssi\":%d,\"still\":%s,\"ph\":%d,\"v\":%d,\"seq\":%lu,\"msg\":\"%s\",\"msgSeq\":%lu}",
-           k.id, pod::online(k) ? "true" : "false", k.fw, k.imu ? "true" : "false", k.cal ? "true" : "false", k.sides, k.rssi, k.still ? "true" : "false", k.ph, k.v,
+           k.id, online(k) ? "true" : "false", k.fw, k.imu ? "true" : "false", k.cal ? "true" : "false", k.sides, k.rssi, k.still ? "true" : "false", k.ph, k.v,
            (unsigned long)k.seq, k.msg, (unsigned long)k.msgSeq);
   c += pj;
 }
+}
+int phoneCount() { int n = WiFi.softAPgetStationNum(); for (auto& k : pod::s) if (k.id[0] && pod::online(k)) n--; return n < 0 ? 0 : n; }
 
 // ---- the shared bits of each request ----
 // /live: sensor status; with from=N also the run so far (up to 150 points, every 20th reading)
@@ -878,9 +880,9 @@ size_t buildLive(char* json, size_t cap, long from, const char* role) {
     // the waist pods: "pods" (all of them), "pod" (the first, for older copies of the app)
     xSemaphoreTake(uiLock, portMAX_DELAY);
     c += ",\"pods\":["; bool first = true; const pod::Slot* one = nullptr;
-    for (auto& k : pod::s) if (k.id[0]) { if (!first) c += ","; podJson(c, k); first = false; if (!one || (!pod::online(*one) && pod::online(k))) one = &k; }
+    for (auto& k : pod::s) if (k.id[0]) { if (!first) c += ","; pod::json(c, k); first = false; if (!one || (!pod::online(*one) && pod::online(k))) one = &k; }
     c += "]";
-    if (one) { c += ",\"pod\":"; podJson(c, *one); }
+    if (one) { c += ",\"pod\":"; pod::json(c, *one); }
     xSemaphoreGive(uiLock);
     len += snprintf(json + len, cap - len, "%s", c.c_str());
   }
@@ -1128,7 +1130,7 @@ static esp_err_t hsPodData(httpd_req_t* r) {
 }
 static esp_err_t hsPodFw(httpd_req_t* r) {
   PodSink k; size_t total = r->content_len;
-  if (!podSinkBegin(k, total, true)) return hsJson(r, "{\"ok\":false,\"error\":\"too big\"}");
+  if (!podSinkBegin(k, total, true, String())) return hsJson(r, "{\"ok\":false,\"error\":\"too big\"}");
   static uint8_t b[4096]; size_t done = 0;
   while (done < total) { int got = httpd_req_recv(r, (char*)b, total - done < sizeof b ? total - done : sizeof b); if (got == HTTPD_SOCK_ERR_TIMEOUT) continue; if (got <= 0) break; podSinkWrite(k, b, got); done += got; }
   if (done != total) k.ok = false;
