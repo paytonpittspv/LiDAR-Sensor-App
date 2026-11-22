@@ -480,6 +480,15 @@ html.disp-on,html.disp-on body{overflow:hidden}
 @keyframes dframe{50%{box-shadow:inset 0 0 0 1.6vw rgba(255,45,138,.35)}}
 .s-result .d-num{font-size:min(41vh,28vw)}
 .s-result .d-res{display:flex;flex-direction:column;gap:7vh}
+.d-jump{flex:1;display:flex;gap:5vw;align-items:stretch;min-height:0}
+.d-jbar{position:relative;flex:0 0 min(16vw,22vh);border-radius:3vh;background:#1c1830;overflow:hidden;border:.3vh solid #2b2546}
+.d-jbar b{position:absolute;left:0;right:0;bottom:0;height:0;background:linear-gradient(0deg,#ff2d8a,#8b5cf6 55%,#22b8ff)}
+.d-jbar i{position:absolute;left:0;right:0;height:0;border-top:.25vh solid rgba(244,241,255,.18);z-index:1}
+.d-jbar i span{position:absolute;right:.8vw;top:-2.4vh;font-size:min(3.4vh,2.2vw);font-style:normal;color:#9c95b8}
+.d-jbar em{position:absolute;left:0;right:0;height:0;border-top:.7vh dashed #f4f1ff;z-index:2}
+.d-jbar em span{position:absolute;left:.8vw;top:-4.6vh;font-size:min(3.6vh,2.3vw);font-style:normal;white-space:nowrap}
+.d-jread{flex:1;display:flex;flex-direction:column;justify-content:flex-end;min-width:0}
+.d-jread .d-sub{text-align:left;margin-top:1.5vh}.s-jump .d-num{font-size:min(46vh,30vw)}.s-jump .d-name{font-size:min(28vh,14vw)}
 .d-cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(20vw,1fr));gap:2vh 3vw}
 .d-cell{font-size:min(14vh,6vw);line-height:1;white-space:nowrap;margin-top:1vh}
 .d-next{display:flex;align-items:baseline;gap:3vw;border-top:.4vh solid #2b2546;padding-top:2vh;font-size:min(11vh,7vw);line-height:1;white-space:nowrap;overflow:hidden}

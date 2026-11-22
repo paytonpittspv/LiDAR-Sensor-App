@@ -588,6 +588,20 @@ async function dispLoop() {
   drawDisplay();
   setTimeout(dispLoop, 200);
 }
+// the big display's in-air bar: flies the takeoff speed (h = v·t − g·t²/2) up to its peak, every frame
+function dispAirTick() {
+  if (dispAirTick.on) return; dispAirTick.on = true;
+  const f = () => {
+    const A = disp.air, fill = $("#dJfill"), val = $("#dJval");
+    if (!A || !disp.on || !fill) { dispAirTick.on = false; return; }
+    const g = 9.80665, t = (performance.now() - A.t0) / 1000, tp = A.v / g, peak = (A.v * A.v) / (2 * g);
+    const h = t >= tp ? peak : Math.max(0, A.v * t - (g * t * t) / 2), top = parseFloat(fill.parentElement.dataset.top) || 0.7;
+    fill.style.height = `${Math.min(100, (100 * h) / top)}%`; if (val) val.textContent = (h * 100).toFixed(0);
+    if (t >= tp) { const n = $("#dJnote"); if (n && !n.dataset.peak) { n.dataset.peak = "1"; n.textContent = "PEAK \u00b7 EXACT NUMBER NEXT"; } }
+    requestAnimationFrame(f);
+  };
+  requestAnimationFrame(f);
+}
 function drawDisplay() {
   const el = $("#disp"); if (!el) return;
   const j = disp.data, E = esc;
@@ -625,6 +639,34 @@ function drawDisplay() {
     body = `<div class="d-res"><div><div class="d-label">${E(j.head)}</div><div class="d-num d-bluet">${E(j.hv)}<small>${E(j.hu)}</small></div></div>
       <div class="d-cells">${(j.cells || []).map(([k, v, u]) => `<div><div class="d-label">${E(k)}</div><div class="d-cell">${E(v)}<small>${E(u)}</small></div></div>`).join("")}</div></div>
       ${j.next ? `<div class="d-next"${roster.length ? ' data-d="picker"' : ""}><span>UP NEXT</span><b>${E(j.next)}</b>${roster.length ? "<i>change</i>" : ""}</div>` : ""}`;
+  } else if (j.s === "jump") {
+    // the Jump test (waist pods): up now → set → in the air (a bar rising with the height) → result
+    const ph = j.jPh || 0;
+    if (ph !== 2 && ph !== 3) disp.air = null;
+    if (j.jRes) {
+      st = strip("d-blue", "VERTICAL JUMP", E(j.jRw));
+      body = `<div class="d-res"><div><div class="d-label">TAKEOFF TO PEAK</div><div class="d-num d-bluet">${E(j.jH)}<small>cm</small></div></div>
+        <div class="d-cells">${j.jHs ? `<div><div class="d-label">STANDING TO PEAK</div><div class="d-cell">${E(j.jHs)}<small>cm</small></div></div>` : ""}${j.jHm ? `<div><div class="d-label">JUMP MAT</div><div class="d-cell">${E(j.jHm)}<small>cm</small></div></div>` : ""}</div></div>
+        ${j.jNext ? `<div class="d-next"><span>UP NEXT</span><b>${E(j.jNext)}</b></div>` : ""}`;
+    } else if ((ph === 2 || ph === 3) && j.jV > 0) {
+      if (!disp.air || disp.air.v !== j.jV) disp.air = { v: j.jV, t0: performance.now() - (j.jAir || 0) };
+      const best = parseFloat(j.jBest) / 100 || 0, peak = (j.jV * j.jV) / (2 * 9.80665), top = Math.max(0.7, Math.ceil(Math.max(best, peak) * 1.2 * 10) / 10);
+      let ticks = ""; for (let c = 10; c < top * 100; c += 10) ticks += `<i style="bottom:${(100 * c) / 100 / top}%"><span>${c}</span></i>`;
+      st = strip("d-purple", ph === 2 ? "IN THE AIR" : "LANDED", E(j.jWho));
+      body = `<div class="d-jump"><div class="d-jbar" data-top="${top}">${ticks}<b id="dJfill"></b>${best ? `<em style="bottom:${(100 * best) / top}%"><span>BEST ${E(j.jBest)}</span></em>` : ""}</div>
+        <div class="d-jread"><div class="d-label">HEIGHT</div><div class="d-num"><span id="dJval">0</span><small>cm</small></div><div class="d-sub" id="dJnote">${E(j.jPod)}</div></div></div>`;
+      dispAirTick();
+    } else if (ph === 1) {
+      st = strip("d-pink", "SET", E(j.jWho));
+      body = `<div class="d-fit d-pulse">${innerHeight > innerWidth ? `<div>JUMP</div><div>WHEN</div>` : `<div>JUMP WHEN</div>`}<div class="d-pinkt">READY</div></div>`;
+    } else if (ph === 3) {
+      st = strip("d-purple", "LANDED", E(j.jWho));
+      body = `<div class="d-center"><div class="d-xl">STAND STILL</div><div class="d-sub">The height shows here in a second.</div></div>`;
+    } else {
+      st = strip("d-green", "JUMP TEST", E(j.jPod));
+      body = `<div class="d-label">UP NOW</div><div class="d-name">${E(j.jWho || "\u2013")}</div>
+        <div class="d-ev">Vertical jump${j.jBest ? ` \u00b7 best today ${E(j.jBest)} cm` : ""}</div><div class="d-cue">Stand still \u00b7 jump \u00b7 stand still</div>`;
+    }
   } else if (j.s === "nolidar") {
     st = strip("d-amber", "NO LIDAR");
     body = `<div class="d-center"><div class="d-xl d-ambert">NO SIGNAL</div><div class="d-sub">The LiDAR isn\u2019t sending anything. Check its cable and the power bank.</div></div>`;
@@ -641,7 +683,7 @@ function drawDisplay() {
   }
   // The roster: always beside UP NEXT; over the armed and result screens when you tap the name.
   // It lives in its own element (only rebuilt when it changes) so scrolling it isn't interrupted.
-  const sName = j ? (j.s === "boot" || j.s === "wifi" ? "ready" : j.s) : "none";
+  const sName = j ? (j.s === "boot" || j.s === "wifi" ? "ready" : j.s === "jump" ? (j.jRes ? "result" : j.jPh === 1 ? "armed" : "jump") : j.s) : "none";
   const side = !!(j && roster.length && sName === "ready" && j.armed && j.who);
   const pop = !!(j && roster.length && disp.picker && (sName === "armed" || sName === "result" || sName === "ready"));
   let main = el.querySelector(".d-main"), rs = el.querySelector(".d-roster");

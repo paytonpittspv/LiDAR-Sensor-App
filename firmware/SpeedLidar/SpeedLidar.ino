@@ -736,6 +736,11 @@ String apiScreen() {
            M.hold, M.inZone ? "true" : "false", M.speed, M.runDist, M.runTarget, M.runTime, M.updatePct);
   o += b;
   q(o, "evs", M.evShort); q(o, "evl", M.evLine); q(o, "who", M.who);
+  if (M.screen == scr::S_JUMP) {   // the jump test: live phase, takeoff speed, ms since takeoff; who; the result
+    char jb[80]; snprintf(jb, sizeof jb, ",\"jPh\":%d,\"jV\":%.2f,\"jAir\":%lu,\"jRes\":%s", M.jPh, M.jV, (unsigned long)M.jAirMs, M.jRes ? "true" : "false"); o += jb;
+    q(o, "jWho", M.jWho); q(o, "jPod", M.jPod); q(o, "jBest", M.jBest); q(o, "jNext", M.jNext);
+    q(o, "jH", M.jH); q(o, "jHs", M.jHs); q(o, "jHm", M.jHm); q(o, "jRw", M.jRWho);
+  }
   q(o, "strip", M.strip); q(o, "head", M.head); q(o, "hv", M.headV); q(o, "hu", M.headU); q(o, "fl", M.footL); q(o, "fr", M.footR);
   // after a result, the next run may already be set up: who's up next
   q(o, "next", sId && aId != sId ? nextWho.c_str() : "");
