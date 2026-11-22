@@ -10,7 +10,7 @@ const jobs = [
   ['icon-192.png', 192, 0.22, 1],          // Android / Chrome, rounded
   ['icon-512.png', 512, 0.22, 1],
   ['icon-maskable-512.png', 512, 0, 0.78], // Android adaptive icon: full bleed, the words inside the safe circle
-  ['favicon-32.png', 32, 0.22, 1, true],   // browser tab: LiDAR alone
+  ['favicon-32.png', 32, 0.22, 1],         // browser tab: the same icon, small
 ];
 const html = (s, round, k, small) => `<html><head><style>${FACE}
 body{margin:0;background:transparent}
