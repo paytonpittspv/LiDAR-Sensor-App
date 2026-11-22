@@ -127,6 +127,22 @@ ol.steps{margin:0;padding-left:20px}ol.steps li{margin:8px 0;font-size:14px;line
 .btn:disabled{opacity:.45}
 @keyframes pulse{50%{opacity:.72}}
 @media (prefers-reduced-motion: reduce){.btn.armed{animation:none}}
+.wpick{display:flex;align-items:center;gap:8px;width:100%;min-height:50px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;font-size:17px;text-align:left;cursor:pointer}
+.wpick b{font-size:20px}.wpick-ch{margin-left:auto;color:var(--muted);font-size:22px}
+.wsheet{position:fixed;inset:0;z-index:100;display:flex;align-items:flex-end;justify-content:center}
+.wsheet-bg{position:absolute;inset:0;background:rgba(8,6,20,.5);opacity:0;transition:opacity .2s}
+.wsheet-card{position:relative;width:100%;max-width:520px;background:var(--bg);border-radius:22px 22px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));transform:translateY(100%);transition:transform .25s ease;box-shadow:0 -10px 30px rgba(0,0,0,.25)}
+.wsheet.on .wsheet-bg{opacity:1}.wsheet.on .wsheet-card{transform:none}
+.wseg{width:160px;margin:0 auto 8px}
+.wread{text-align:center;font-family:var(--display);font-weight:800;font-size:22px;color:var(--muted)}.wread b{font-size:44px;color:var(--text)}
+.wheel-box{position:relative;height:220px;margin:6px 0 14px}
+.wheel-box::before{content:"";position:absolute;left:0;right:0;top:88px;height:44px;border-radius:12px;background:var(--tint-strong);pointer-events:none}
+.wheel-box::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(var(--bg),transparent 35%,transparent 65%,var(--bg))}
+.wheel{position:relative;height:100%;overflow-y:scroll;scroll-snap-type:y mandatory;padding:88px 0;box-sizing:border-box;scrollbar-width:none;overscroll-behavior:contain;outline:none}
+.wheel::-webkit-scrollbar{display:none}
+.wi{height:44px;display:grid;place-items:center;scroll-snap-align:center;font-family:var(--display);font-weight:700;font-size:24px;color:var(--muted)}
+.wi.on{color:var(--text);font-size:30px}
+.wsheet .row .btn{flex:1}
 .seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px;gap:4px}
 .seg button{flex:1;border:0;background:none;color:var(--muted);font-weight:700;padding:10px;border-radius:10px;cursor:pointer}
 .seg button[aria-pressed="true"]{color:var(--text);background:var(--tint-strong)}

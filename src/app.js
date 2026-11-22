@@ -2037,12 +2037,54 @@ function settingsHTML() {
   h += `<p class="small muted" style="text-align:center;margin-top:20px">PAYTON'S LiDAR SENSOR · designed by Payton Pitts</p>`;
   return h;
 }
+const wLabel = (w) => (w !== "" && w != null ? `<b>${w}</b> ${settings.weightUnit}` : `<span class="muted">Set body weight</span>`) + `<span class="wpick-ch">›</span>`;
+// body weight: a sliding wheel in a sheet, with lb / kg above it
+const WHEEL = { lb: { min: 50, max: 400, step: 1, def: 165 }, kg: { min: 25, max: 180, step: 0.5, def: 75 } };
+function wheelOpen() {
+  const inp = $("#athW"); if (!inp) return;
+  let unit = settings.weightUnit, val = parseFloat(inp.value);
+  const sh = document.createElement("div"); sh.className = "wsheet";
+  sh.innerHTML = `<div class="wsheet-bg" data-w="cancel"></div><div class="wsheet-card" role="dialog" aria-label="Body weight">
+    <div class="seg wseg"><button data-w="lb">lb</button><button data-w="kg">kg</button></div>
+    <div class="wread"><b id="wVal"></b> <span id="wUnit"></span></div>
+    <div class="wheel-box"><div class="wheel" id="wheel" tabindex="0"></div></div>
+    <div class="row"><button class="btn ghost" data-w="clear">No weight</button><button class="btn primary" data-w="done">Done</button></div></div>`;
+  document.body.appendChild(sh);
+  const wh = $("#wheel", sh), H = 44;
+  const fmt = (v) => (WHEEL[unit].step < 1 ? v.toFixed(1) : String(Math.round(v)));
+  const cur = () => { const W = WHEEL[unit], i = Math.round(wh.scrollTop / H); return Math.min(W.max, W.min + i * W.step); };
+  const show = () => { $("#wVal", sh).textContent = fmt(cur()); $("#wUnit", sh).textContent = unit; [...wh.children].forEach((c, i) => c.classList.toggle("on", i === Math.round(wh.scrollTop / H))); };
+  const build = (v) => {
+    const W = WHEEL[unit], n = Math.round((W.max - W.min) / W.step) + 1;
+    let h = ""; for (let i = 0; i < n; i++) { const x = W.min + i * W.step; h += `<div class="wi">${W.step < 1 ? x.toFixed(1) : Math.round(x)}</div>`; }
+    wh.innerHTML = h;
+    sh.querySelectorAll(".wseg button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.w === unit));
+    const t = isFinite(v) ? Math.min(W.max, Math.max(W.min, v)) : W.def;
+    wh.scrollTop = Math.round((t - W.min) / W.step) * H; show();
+  };
+  wh.addEventListener("scroll", show, { passive: true });
+  wh.addEventListener("keydown", (e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); wh.scrollTop += e.key === "ArrowUp" ? -H : H; } });
+  const close = () => sh.remove();
+  sh.addEventListener("click", (e) => {
+    const k = e.target.closest("[data-w]"); if (!k) return; const w = k.dataset.w;
+    if (w === "lb" || w === "kg") { if (w === unit) return; const v = cur(); unit = w; build(w === "kg" ? v * 0.453592 : v / 0.453592); }
+    else if (w === "cancel") close();
+    else {
+      const v = w === "done" ? fmt(cur()) : "";
+      if (unit !== settings.weightUnit) { settings.weightUnit = unit; saveSettings(); }
+      inp.value = v; const b = $("#athWBtn"); if (b) b.innerHTML = wLabel(v); close();
+    }
+  });
+  build(val);
+  requestAnimationFrame(() => sh.classList.add("on"));
+}
 function athleteFormHTML(id) {
   const a = id ? athletes.find((x) => x.id === id) : { name: "", kg: null };
   const w = a.kg ? (settings.weightUnit === "lb" ? Math.round(a.kg / 0.453592) : a.kg.toFixed(1)) : "";
   return `<button class="btn sm" data-act="back">‹ Back</button><h1 style="margin-top:10px">${id ? "Edit athlete" : "Add athlete"}</h1>
     <div class="card"><div class="field"><label for="athName">Name</label><input type="text" id="athName" value="${esc(a.name)}" autocomplete="off"></div>
-    <div class="field"><label for="athW">Body weight (${settings.weightUnit}) · optional, used for force and power</label><input type="number" id="athW" inputmode="decimal" value="${w}"></div>
+    <div class="field"><label for="athWBtn">Body weight · optional, used for force and power</label><input type="hidden" id="athW" value="${w}">
+      <button type="button" class="wpick" id="athWBtn" data-act="wheel-open">${wLabel(w)}</button></div>
     <div class="row"><button class="btn primary" data-act="ath-save" data-id="${id || ""}">Save</button>${id ? `<button class="btn danger" data-act="ath-del" data-id="${id}">Delete athlete</button>` : ""}</div></div>`;
 }
 
@@ -2158,6 +2200,7 @@ document.addEventListener("click", (e) => {
       saveAthletes(); toast("Saved"); back(); break;
     }
     case "ath-del": if (el.dataset.confirm === "1") { athletes = athletes.filter((a) => a.id !== id); saveAthletes(); toast("Athlete removed (their runs are kept)"); back(); } else { el.dataset.confirm = "1"; el.textContent = "Tap again to delete"; } break;
+    case "wheel-open": wheelOpen(); break;
     case "unit": settings.weightUnit = v; saveSettings(); render(); break;
     case "theme": settings.theme = v || null; saveSettings(); if (v) document.documentElement.setAttribute("data-theme", v); else document.documentElement.removeAttribute("data-theme"); render(); break;
     case "export": exportBackup(); break;
