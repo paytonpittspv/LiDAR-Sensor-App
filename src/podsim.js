@@ -118,6 +118,14 @@ const PodSim = (() => {
     r.calibrated = true;
     return { rec: r, truth: Math.max(...r.podZ.slice(iTo, iL)) - r.podZ[iTo] };
   }
-  return { path, setGyroSign: (s) => (GYRO_SIGN = s), record, jump, vault, chipErrors, setSeed: (v) => (seed = v), gauss, simJump };
+  // a ready-made vault recording (for the app's simulated runs): faster into the box, a bit higher. { rec, rest, truth }
+  function simVault(speed = 8.5, s = Math.floor(Math.random() * 1e9)) {
+    seed = s % 2147483646 + 1;
+    const zRel = 4.2 + Math.max(-0.6, Math.min(0.9, (speed - 8.3) * 0.35)) + 0.15 * gauss(), vRel = 0.4 + 0.8 * rnd(), mat = 0.8;
+    const V = vault(zRel, vRel, mat), r = record({ ...V, err: chipErrors(true) });
+    r.calibrated = true;
+    return { rec: r, rest: r.podZ[r.podZ.length - 1], truth: V.truth.zPeak };
+  }
+  return { path, setGyroSign: (s) => (GYRO_SIGN = s), record, jump, vault, chipErrors, setSeed: (v) => (seed = v), gauss, simJump, simVault };
 })();
 if (typeof module !== "undefined") module.exports = PodSim;

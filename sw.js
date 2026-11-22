@@ -2,7 +2,7 @@
 //   sensor.paytonpittsdesigns.com  the sensor itself (only reachable on its Wi-Fi): open from the saved copy
 //                                  straight away, and update that copy in the background whenever the sensor is there
 //   GitHub Pages                   newest from the network when online, the saved copy when offline
-const VERSION = "24a124f4a1";
+const VERSION = "6e6fd755bb";
 const CACHE = "lidar-sensor-" + VERSION;
 const SENSOR = "sensor.paytonpittsdesigns.com";
 const onSensor = self.location.hostname === SENSOR;

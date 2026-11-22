@@ -520,7 +520,7 @@ function finishCapture(raw) {
     cap.error = res.error; arm(); return;
   }
   const run = { id: uid(), ts: Date.now(), athleteId: cap.athleteId, mode: cap.mode, res };
-  if (cap.simRun) { run.sim = true; cap.simRun = false; }
+  if (cap.simRun) { run.sim = true; cap.simRun = false; if (run.mode === "vault") simPodPeak(run); }
   if (cap.mode === "sprint") run.target = cap.target; else run.setup = cap.setup;
   if (live && cap.armId != null) showOnSensor(run, cap.armId);
   if (settings.solo) {
@@ -1151,7 +1151,8 @@ function resultsHTML(run) {
     if (R.startMarkFt != null) h += cardHTML("Start mark ≈", ftLabel(R.startMarkFt), "", "from the box");
     if (R.box10to5) h += cardHTML("33 → 16 ft out", f2(R.box10to5.speed), "m/s", "fixed window from the box");
     h += cardHTML("Approach", f2(R.approachTime), "s", `${f1(R.approachDist)} m to takeoff`);
-    if (R.pod) h += R.pod.error ? cardHTML("Peak hip height", "—", "", esc(R.pod.error)) : cardHTML("Peak hip height", ftLabel(R.pod.peak / FT), "", `${R.pod.peak.toFixed(2)} m · waist pod${R.pod.cal ? "" : " (not calibrated)"}${R.pod.note ? " · " + esc(R.pod.note) : ""}`);
+    if (R.pod) h += R.pod.error ? cardHTML("Peak hip height ≈", "—", "", esc(R.pod.error)) : cardHTML("Peak hip height ≈", ftLabel(R.pod.peak / FT), "", `${R.pod.peak.toFixed(2)} m · waist pod${R.pod.sim ? " (simulated)" : R.pod.cal ? "" : " (not calibrated)"}${R.pod.note ? " · " + esc(R.pod.note) : ""}`);
+    else if (!(SETUPS[run.setup] || {}).pole) h += cardHTML("Peak hip height ≈", "—", "", "Wear a waist pod to measure it");
     h += `</div>`;
   }
   if (run.mode === "vault") h += leftsCardHTML(run);
@@ -1490,6 +1491,12 @@ function podJump(rec, sim, podId) {
   say(`${(podsOn().length > 1 ? firstName(a) + ", " : "")}${(R.height * 100).toFixed(0)} centimeters`);
   render();
   jumpScreen.at = 0; jumpScreen();
+}
+// a simulated vault run (no pod): what a waist pod would have given, through the same math
+function simPodPeak(run) {
+  if ((SETUPS[run.setup] || {}).pole || !run.res) return;
+  const sp = (run.res.last5 && run.res.last5.speed) || 8.3, S = PodSim.simVault(sp), R = PodEngine.analyzeVault(S.rec, S.rest);
+  run.res.pod = R.ok ? { peak: R.peak, impact: R.impactSpeed, flight: R.flightTime, note: R.note, cal: true, sim: true } : { error: R.why };
 }
 function podVault(rec) {
   // the latest vault run on the runway (not a pole run: that has no pit landing), finished within the last 90 s
@@ -2584,7 +2591,7 @@ function addDemoData() {
           if (!probe.error) { const shift = Math.round((box - (11 + Math.random() * 2.5) * FT - 0.5 - probe.takeoff.sensor) * 100); sv.raw.d = sv.raw.d.map((cm) => (cm > 0 ? Math.max(1, cm + shift) : cm)); }
         }
         const rv = Engine.process(sv.raw, ctx);
-        if (!rv.error) runs.push({ id: uid(), ts: ts + 300e3, athleteId: a.id, mode: "vault", setup, res: rv, sim: true });
+        if (!rv.error) { const run = { id: uid(), ts: ts + 300e3, athleteId: a.id, mode: "vault", setup, res: rv, sim: true }; simPodPeak(run); runs.push(run); }
       }
     }
   }
