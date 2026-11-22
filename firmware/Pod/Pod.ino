@@ -24,7 +24,7 @@
 #include <Preferences.h>
 #include <esp_sleep.h>
 
-static const char* FW = "pod-1.1";
+static const char* FW = "pod-1.2";
 static const char* SSID = "SpeedLidar";
 static const char* PASS = "vault1234";
 static const char* SENSOR = "http://192.168.4.1";
@@ -86,6 +86,7 @@ volatile uint32_t lastMove = 0;               // millis() of the last sample tha
 volatile uint32_t flightAt = 0;               // head when the last flight started (0 = none waiting)
 volatile uint32_t stillRun = 0, ffRun = 0;    // consecutive still / free-fall samples
 volatile bool sendNow = false;
+volatile float liveV = 0;                     // takeoff speed of the last flight (m/s), worked out live for the app's bar
 volatile int calSide = -1;                    // a side being measured (0..5), or -1
 float calAcc[3]; int calN = 0;
 
@@ -108,6 +109,29 @@ void onSample(const int32_t acc[3], const int32_t gyr[3]) {   // sums of OVER ra
   stillRun = still ? stillRun + 1 : 0;
   ffRun = ff ? ffRun + 1 : 0;
   if (!still) lastMove = millis();
+  // live takeoff speed: standing still teaches it gravity's direction and size and the gyro's offset; from there it
+  // follows gravity's direction with the gyro and adds up the vertical acceleration. The speed where the free fall
+  // starts is the takeoff speed (in the simulator: within about 1 cm of the jump height, calibrated). The app's
+  // rising bar runs from it; the real answer still comes from the full recording after the landing.
+  {
+    static float gv[3] = {0, 0, 0}, gb[3] = {0, 0, 0}, u[3] = {0, 0, 1}, gmag = 9.80665f, vz = 0, vff = 0; static bool primed = false;
+    float a[3], w[3];
+    for (int k = 0; k < 3; k++) { a[k] = af[k] * ACC_LSB; w[k] = s.g[k] * GYR_LSB; }
+    if (stillRun >= 40) {
+      float kk = primed ? 0.02f : 1.f; primed = true;
+      for (int k = 0; k < 3; k++) { gv[k] += kk * (a[k] - gv[k]); gb[k] += kk * (w[k] - gb[k]); }
+      gmag = sqrtf(gv[0] * gv[0] + gv[1] * gv[1] + gv[2] * gv[2]);
+      if (gmag > 1.f) for (int k = 0; k < 3; k++) u[k] = gv[k] / gmag;
+      vz = 0;
+    } else if (primed) {
+      vz += (a[0] * u[0] + a[1] * u[1] + a[2] * u[2] - gmag) / HZ;
+      float o0 = (w[0] - gb[0]) / HZ, o1 = (w[1] - gb[1]) / HZ, o2 = (w[2] - gb[2]) / HZ;
+      float n0 = u[0] - (o1 * u[2] - o2 * u[1]), n1 = u[1] - (o2 * u[0] - o0 * u[2]), n2 = u[2] - (o0 * u[1] - o1 * u[0]);
+      float nn = sqrtf(n0 * n0 + n1 * n1 + n2 * n2); if (nn > 0) { u[0] = n0 / nn; u[1] = n1 / nn; u[2] = n2 / nn; }
+    }
+    if (ffRun == 1) vff = vz;
+    if (ffRun == 32) liveV = vff;
+  }
   if (ffRun == 32) flightAt = head - 32;          // 80 ms in the air: a flight
   if (flightAt && stillRun >= (uint32_t)HZ) {     // then 1 s still: send it
     sendNow = true; flightAt = 0;
@@ -185,9 +209,9 @@ uint8_t phaseNow() {
 }
 void hello() {
   HTTPClient http; http.setTimeout(1500);
-  char q[200];
-  snprintf(q, sizeof q, "%s/pod/hello?fw=%s&imu=%d&cal=%d&sides=%u&rssi=%d&still=%d&ph=%u&up=%lu&msg=%s", SENSOR, FW, imuOk ? 1 : 0, calibrated ? 1 : 0,
-           (unsigned)sidesDone, WiFi.RSSI(), stillRun >= (uint32_t)HZ ? 1 : 0, (unsigned)phaseNow(), (unsigned long)(millis() / 1000), lastMsg.c_str());
+  char q[240];
+  snprintf(q, sizeof q, "%s/pod/hello?fw=%s&imu=%d&cal=%d&sides=%u&rssi=%d&still=%d&ph=%u&v=%d&up=%lu&msg=%s", SENSOR, FW, imuOk ? 1 : 0, calibrated ? 1 : 0,
+           (unsigned)sidesDone, WiFi.RSSI(), stillRun >= (uint32_t)HZ ? 1 : 0, (unsigned)phaseNow(), (int)lrintf(liveV * 100.f), (unsigned long)(millis() / 1000), lastMsg.c_str());
   http.begin(q);
   if (http.GET() != 200) { http.end(); return; }
   String r = http.getString(); http.end();

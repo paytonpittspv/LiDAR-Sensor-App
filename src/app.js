@@ -1362,7 +1362,11 @@ function podWatch() {
     const ph = P.on ? P.ph || 0 : -1;
     // the result stays until the pod has moved (handed over, or walked back) and someone stands still with it again
     if (pod.show) { if (ph === 0) pod.sawMove = true; else if (ph === 1 && pod.sawMove && Date.now() - pod.showAt > 3000) { pod.show = null; pod.lastPh = null; } }
-    if (ph !== pod.lastPh) { pod.lastPh = ph; if (!luDrag.dragging) render(); }
+    if (ph !== pod.lastPh) {
+      // takeoff: the pod sends its takeoff speed about 80 ms into the flight (plus Wi-Fi); the bar flies from there
+      if (ph === 2) pod.air = P.v ? { v: P.v / 100, t0: performance.now() - 120 } : null;
+      pod.lastPh = ph; if (!luDrag.dragging) render(); if (pod.air) airTick();
+    }
   }
   if (pod.seq === null) { pod.seq = P.seq; return; }       // what was there before the app opened isn't new
   if (P.seq !== pod.seq && !pod.busy) { pod.seq = P.seq; podFetch(); }
@@ -1393,7 +1397,7 @@ function podJump(rec, sim) {
   const j = { id: uid(), ts: Date.now(), athleteId: a, h: R.height, hStand: R.heightStanding, hFlight: R.heightFlight, t: R.flightTime, agree: R.agree, cal: rec.calibrated, sim: !!sim };
   jumps.unshift(j); saveJumps();
   // the result stays up (see jumpHTML); whoever is next is lined up behind it
-  pod.show = j.id; pod.showAt = Date.now(); pod.sawMove = false;
+  pod.show = j.id; pod.showAt = Date.now(); pod.sawMove = false; pod.air = null;
   pod.turn = (pod.turn || 0) + 1;
   if (pod.turn >= (settings.jumpEach || 1)) { pod.turn = 0; if (cap.queue.length > 1 && cap.queue.includes(a)) cap.athleteId = cap.queue[(cap.queue.indexOf(a) + 1) % cap.queue.length]; }
   settings.lastAthlete = cap.athleteId; saveSettings();
@@ -1479,6 +1483,7 @@ function jumpHTML() {
   } else if (ph === -1) h += stage("d-amber", WEB_COPY || !sensor.connected ? "No pod" : "Waiting for the pod", "", upNow("No pod connected. Try it with a simulated jump."));
   else if (ph === 0) h += stage("d-green", "Ready", "Pod on", upNow(`<span class="st-cue">Stand still to start</span>`));
   else if (ph === 1) h += stage("d-pink", "Set", name, `<div class="st-go"><div>Jump when</div><div class="pk">ready</div></div>`, "armed");
+  else if ((ph === 2 || ph === 3) && pod.air) h += stage("d-purple", ph === 2 ? "In the air" : "Landed · stand still", name, airBarHTML());
   else if (ph === 2) h += stage("d-purple", "In the air", name, `<div class="st-center"><div class="st-xl st-pulse">In the air</div></div>`);
   else if (ph === 3) h += stage("d-purple", "Landed", name, `<div class="st-center"><div class="st-xl">Stand still</div><div class="st-ev" style="margin-top:14px">The height shows up in a second.</div></div>`);
   else h += stage("d-blue", "Jump done", name, `<div class="st-center"><div class="st-xl st-pulse">Working it out</div></div>`);
@@ -1497,16 +1502,50 @@ function jumpHTML() {
   }
   return h;
 }
+// the rising bar while in the air: flies the takeoff speed (h = v·t − g·t²/2) up to its peak and holds it there.
+// A live preview; the real number comes from the full recording a moment after landing.
+function airScale() {
+  const mine = jumps.filter((j) => j.athleteId === cap.athleteId && dayKey(j.ts) === dayKey(Date.now()));
+  const best = mine.reduce((b, j) => Math.max(b, j.h), 0), peak = pod.air ? (pod.air.v * pod.air.v) / (2 * PodEngine.G) : 0;
+  return { best, top: Math.max(0.7, Math.ceil((Math.max(best, peak) * 1.2) * 10) / 10) };
+}
+function airBarHTML() {
+  const { best, top } = airScale(), pct = (m) => `${Math.min(100, (100 * m) / top).toFixed(1)}%`;
+  let ticks = ""; for (let c = 10; c < top * 100; c += 10) ticks += `<div class="jbar-tick" style="bottom:${pct(c / 100)}"><span>${c}</span></div>`;
+  return `<div class="jbar-wrap"><div class="jbar">${ticks}<div class="jbar-fill" id="jbFill"></div>${best ? `<div class="jbar-best" style="bottom:${pct(best)}"><span>best ${fmtJump(best)}</span></div>` : ""}</div>
+    <div class="jbar-read"><div class="st-label">Height</div><div class="st-big"><span id="jbVal">0</span><small>cm</small></div><div class="st-ev" id="jbNote">live from the takeoff speed</div></div></div>`;
+}
+function airTick() {
+  if (airTick.on) return; airTick.on = true;
+  const f = () => {
+    const A = pod.air;
+    if (!A || view !== "jump") { airTick.on = false; return; }
+    const G = PodEngine.G, t = (performance.now() - A.t0) / 1000, tp = A.v / G, peak = (A.v * A.v) / (2 * G);
+    const hNow = t >= tp ? peak : Math.max(0, A.v * t - (G * t * t) / 2);
+    const fill = $("#jbFill"), val = $("#jbVal"), { top } = airScale();
+    if (fill) fill.style.height = `${Math.min(100, (100 * hNow) / top)}%`;
+    if (val) val.textContent = (hNow * 100).toFixed(0);
+    if (t >= tp) { const n = $("#jbNote"); if (n) n.textContent = "peak · exact number in a second"; }
+    requestAnimationFrame(f);
+  };
+  requestAnimationFrame(f);
+}
 // no pod: a simulated jump through the same math (PodSim makes what the pod's chip would read)
 function jumpSim() {
   if (pod.simPh != null || !cap.athleteId) return;
   pod.show = null;
-  const hTrue = 0.3 + 0.35 * Math.random(), steps = [[1, 1100], [2, 560], [3, 1000], [4, 500]];
+  const rec = PodSim.simJump(0.3 + 0.35 * Math.random()).rec, R = PodEngine.analyzeJump(rec);
+  const flight = R.ok ? R.flightTime * 1000 : 560, steps = [[1, 1100], [2, flight], [3, 1000], [4, 500]];
   let i = 0;
   const next = () => {
-    if (i < steps.length) { pod.simPh = steps[i][0]; render(); setTimeout(next, steps[i++][1]); return; }
-    pod.simPh = null;
-    podJump(PodSim.simJump(hTrue).rec, true);
+    if (i < steps.length) {
+      pod.simPh = steps[i][0];
+      if (pod.simPh === 2) pod.air = R.ok ? { v: R.takeoffSpeed, t0: performance.now() } : null;
+      render(); if (pod.simPh === 2 && pod.air) airTick();
+      setTimeout(next, steps[i++][1]); return;
+    }
+    pod.simPh = null; pod.air = null;
+    podJump(rec, true);
   };
   next();
 }
