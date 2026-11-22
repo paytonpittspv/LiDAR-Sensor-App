@@ -1292,8 +1292,8 @@ function levelHTML() {
   h += `<div class="card"><div class="label">Where the beam goes</div>${lvSideSVG(j.pitch)}
     <div id="lvBeamTxt" class="small" style="margin:6px 0 10px">${lvBeamLine(j.pitch).text}</div>
     <div class="seg" style="margin-bottom:10px">${LV_DIST.map(([t, d]) => `<button data-act="lv-at" data-v="${d}" aria-pressed="${Math.abs(d - at) < 0.05}">${t}</button>`).join("")}</div>
-    <div class="grid2"><div class="field" style="margin:0"><label for="lvSensorH">Sensor height (${unit})</label><input type="number" inputmode="decimal" id="lvSensorH" value="${toU(lvSensorH())}"></div>
-      <div class="field" style="margin:0"><label for="lvBackH">Back height (${unit})</label><input type="number" inputmode="decimal" id="lvBackH" value="${toU(lvBackH())}"></div></div>
+    <div class="grid2"><div class="field" style="margin:0"><label for="lvSensorH">Sensor height (${unit})</label><input type="number" inputmode="decimal" id="lvSensorH" data-unit="${unit}" data-min="${lvImperial() ? 10 : 25}" data-max="${lvImperial() ? 80 : 200}" data-def="${lvImperial() ? 40 : 100}" value="${toU(lvSensorH())}"></div>
+      <div class="field" style="margin:0"><label for="lvBackH">Back height (${unit})</label><input type="number" inputmode="decimal" id="lvBackH" data-unit="${unit}" data-min="${lvImperial() ? 10 : 25}" data-max="${lvImperial() ? 80 : 200}" data-def="${lvImperial() ? 40 : 100}" value="${toU(lvBackH())}"></div></div>
     <div class="small muted" style="margin-top:8px">Sensor height: the ground to the middle of the front window. Back height: where you want the beam to hit, about the middle of the lower back. Set the tripod to that height and level it, and the beam stays on the back the whole way down.</div></div>`;
   // bump alarm
   const bumpTxt = j.bumpWhy === "turned" ? `turned ${j.bumpDeg.toFixed(1)}° left or right` : j.bumpWhy === "leaned" ? `leaned ${j.bumpDeg.toFixed(1)}° to the side` : `nose ${j.bumpDeg > 0 ? "up" : "down"} ${Math.abs(j.bumpDeg).toFixed(1)}°`;
@@ -1458,7 +1458,7 @@ function podStatusLine(P) {
 // Settings card
 function podCardHTML() {
   const unit = lvImperial() ? "in" : "cm", v = lvImperial() ? Math.round(podRest() / 0.0254) : Math.round(podRest() * 100);
-  const rest = `<div class="field" style="margin:0"><label for="podRest">Pod height lying on the mat (${unit})</label><input type="number" inputmode="decimal" id="podRest" value="${v}"></div>`;
+  const rest = `<div class="field" style="margin:0"><label for="podRest">Pod height lying on the mat (${unit})</label><input type="number" inputmode="decimal" id="podRest" data-unit="${unit}" data-min="${lvImperial() ? 10 : 25}" data-max="${lvImperial() ? 70 : 180}" data-def="${lvImperial() ? 39 : 100}" value="${v}"></div>`;
   // this copy of the app can't reach the pods (they talk to the sensor): what works here, and where the rest lives
   if (WEB_COPY) return `<div class="card"><div class="label">Waist pods</div>
     <div class="small muted" style="margin:4px 0 10px">The pods talk to the sensor, so their status, calibration and updates are on the sensor's page (join the SpeedLidar Wi-Fi). The Jump test works here with simulated jumps.</div>
@@ -1730,7 +1730,7 @@ function wizardHTML() {
       <button class="tile" data-act="go-jump"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5a1.5 1.5 0 1 0 0 .01"/><path d="M8 11l4-3 4 3M12 8v6l-3 4M12 14l3 4"/><path d="M4 21h16"/><path d="M19 4v6M17 6l2-2 2 2"/></svg><b>Vertical jump</b><span>Jump height from the waist pod</span></button></div>`;
   } else if (cap.step === "distance" && !vault) {
     h += `<div class="label" style="margin-bottom:8px">Stop at</div><div class="bigchips">${[10, 20, 30, 40, 60].map((d) => `<button class="chip big" data-act="cap-target" data-v="${d}" aria-pressed="${cap.target === d}">${d} m</button>`).join("")}</div>
-      <div class="row" style="gap:8px;margin-top:12px"><input type="number" id="customTarget" inputmode="numeric" min="5" max="80" placeholder="Other distance" style="flex:1" value="${[10, 20, 30, 40, 60].includes(cap.target) ? "" : cap.target}"><span class="muted">m</span><button class="btn" data-act="cap-target-custom">Next</button></div>
+      <div class="row" style="gap:8px;margin-top:12px"><input type="number" id="customTarget" inputmode="numeric" min="5" max="80" data-def="50" data-unit="m" data-title="Stop at" data-then="cap-target-custom" placeholder="Other distance" style="flex:1" value="${[10, 20, 30, 40, 60].includes(cap.target) ? "" : cap.target}"><button class="btn" data-act="cap-target-custom" hidden>Next</button></div>
       <div class="small muted" style="margin-top:14px">Recording starts by itself when the athlete moves and stops at this distance.</div>`;
   } else if (cap.step === "distance") {
     const pole = !!SETUPS[cap.setup].pole, far = SETUPS[cap.setup].boxFt === 150;
@@ -2188,45 +2188,76 @@ function settingsHTML() {
   return h;
 }
 const wLabel = (w) => (w !== "" && w != null ? `<b>${w}</b> ${settings.weightUnit}` : `<span class="muted">Set body weight</span>`) + `<span class="wpick-ch">›</span>`;
-// body weight: a sliding wheel in a sheet, with lb / kg above it
-const WHEEL = { lb: { min: 50, max: 400, step: 1, def: 165 }, kg: { min: 25, max: 180, step: 0.5, def: 75 } };
-function wheelOpen() {
-  const inp = $("#athW"); if (!inp) return;
-  let unit = settings.weightUnit, val = parseFloat(inp.value);
+// Every number in the app is picked on a sliding wheel in a sheet from the bottom.
+//   numWheel({ title, units: { key: { min, max, step, def, label } }, unit, value, convert(v, from, to), clear, onDone(value, unit) })
+//   value "" means none (only with clear: a "No …" button)
+function numWheel(o) {
+  let unit = o.unit, keys = Object.keys(o.units);
   const sh = document.createElement("div"); sh.className = "wsheet";
-  sh.innerHTML = `<div class="wsheet-bg" data-w="cancel"></div><div class="wsheet-card" role="dialog" aria-label="Body weight">
-    <div class="seg wseg"><button data-w="lb">lb</button><button data-w="kg">kg</button></div>
+  sh.innerHTML = `<div class="wsheet-bg" data-w="cancel"></div><div class="wsheet-card" role="dialog" aria-label="${esc(o.title || "Pick a number")}">
+    ${o.title ? `<div class="wtitle">${esc(o.title)}</div>` : ""}
+    ${keys.length > 1 ? `<div class="seg wseg">${keys.map((k) => `<button data-w="u:${k}">${esc(o.units[k].label || k)}</button>`).join("")}</div>` : ""}
     <div class="wread"><b id="wVal"></b> <span id="wUnit"></span></div>
     <div class="wheel-box"><div class="wheel" id="wheel" tabindex="0"></div></div>
-    <div class="row"><button class="btn ghost" data-w="clear">No weight</button><button class="btn primary" data-w="done">Done</button></div></div>`;
+    <div class="row">${o.clear ? `<button class="btn ghost" data-w="clear">${esc(o.clear)}</button>` : `<button class="btn ghost" data-w="cancel">Cancel</button>`}<button class="btn primary" data-w="done">Done</button></div></div>`;
   document.body.appendChild(sh);
-  const wh = $("#wheel", sh), H = 44;
-  const fmt = (v) => (WHEEL[unit].step < 1 ? v.toFixed(1) : String(Math.round(v)));
-  const cur = () => { const W = WHEEL[unit], i = Math.round(wh.scrollTop / H); return Math.min(W.max, W.min + i * W.step); };
-  const show = () => { $("#wVal", sh).textContent = fmt(cur()); $("#wUnit", sh).textContent = unit; [...wh.children].forEach((c, i) => c.classList.toggle("on", i === Math.round(wh.scrollTop / H))); };
+  const wh = $("#wheel", sh), H = 44, U = () => o.units[unit];
+  const dec = () => (U().step < 1 ? (String(U().step).split(".")[1] || "").length : 0);
+  const fmt = (v) => v.toFixed(dec());
+  const cur = () => { const W = U(), i = Math.round(wh.scrollTop / H); return Math.min(W.max, W.min + i * W.step); };
+  const show = () => { $("#wVal", sh).textContent = fmt(cur()); $("#wUnit", sh).textContent = U().label || unit; [...wh.children].forEach((c, i) => c.classList.toggle("on", i === Math.round(wh.scrollTop / H))); };
   const build = (v) => {
-    const W = WHEEL[unit], n = Math.round((W.max - W.min) / W.step) + 1;
-    let h = ""; for (let i = 0; i < n; i++) { const x = W.min + i * W.step; h += `<div class="wi">${W.step < 1 ? x.toFixed(1) : Math.round(x)}</div>`; }
+    const W = U(), n = Math.round((W.max - W.min) / W.step) + 1;
+    let h = ""; for (let i = 0; i < n; i++) h += `<div class="wi">${fmt(W.min + i * W.step)}</div>`;
     wh.innerHTML = h;
-    sh.querySelectorAll(".wseg button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.w === unit));
+    sh.querySelectorAll(".wseg button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.w === "u:" + unit));
     const t = isFinite(v) ? Math.min(W.max, Math.max(W.min, v)) : W.def;
     wh.scrollTop = Math.round((t - W.min) / W.step) * H; show();
   };
   wh.addEventListener("scroll", show, { passive: true });
-  wh.addEventListener("keydown", (e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); wh.scrollTop += e.key === "ArrowUp" ? -H : H; } });
+  wh.addEventListener("keydown", (e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); wh.scrollTop += e.key === "ArrowUp" ? -H : H; } if (e.key === "Enter") sh.querySelector('[data-w="done"]').click(); });
   const close = () => sh.remove();
   sh.addEventListener("click", (e) => {
     const k = e.target.closest("[data-w]"); if (!k) return; const w = k.dataset.w;
-    if (w === "lb" || w === "kg") { if (w === unit) return; const v = cur(); unit = w; build(w === "kg" ? v * 0.453592 : v / 0.453592); }
+    if (w.startsWith("u:")) { const to = w.slice(2); if (to === unit) return; const v = cur(), from = unit; unit = to; build(o.convert ? o.convert(v, from, to) : v); }
     else if (w === "cancel") close();
-    else {
-      const v = w === "done" ? fmt(cur()) : "";
-      if (unit !== settings.weightUnit) { settings.weightUnit = unit; saveSettings(); }
-      inp.value = v; const b = $("#athWBtn"); if (b) b.innerHTML = wLabel(v); close();
-    }
+    else { const v = w === "done" ? fmt(cur()) : ""; close(); o.onDone(v, unit); }
   });
-  build(val);
-  requestAnimationFrame(() => sh.classList.add("on"));
+  build(parseFloat(o.value));
+  requestAnimationFrame(() => { sh.classList.add("on"); wh.focus({ preventScroll: true }); });
+}
+// body weight: lb / kg above the wheel (switching changes the app's unit too, so the two never mix)
+function wheelOpen() {
+  const inp = $("#athW"); if (!inp) return;
+  numWheel({ title: "Body weight", unit: settings.weightUnit, value: inp.value, clear: "No weight",
+    units: { lb: { min: 50, max: 400, step: 1, def: 165, label: "lb" }, kg: { min: 25, max: 180, step: 0.5, def: 75, label: "kg" } },
+    convert: (v, from, to) => (to === "kg" ? v * 0.453592 : v / 0.453592),
+    onDone: (v, unit) => { if (unit !== settings.weightUnit) { settings.weightUnit = unit; saveSettings(); } inp.value = v; const b = $("#athWBtn"); if (b) b.innerHTML = wLabel(v); } });
+}
+// any other number box: shown as a button that opens the wheel. The box itself stays (hidden), so the code that
+// reads it or listens to it doesn't change. Range from data-min / data-max / data-step, unit from data-unit,
+// title from its label; data-then: an action to run after Done (e.g. the custom distance's Next).
+function wheelify(root = document) {
+  root.querySelectorAll('input[type="number"]:not([data-wheeled])').forEach((inp) => {
+    inp.dataset.wheeled = "1"; inp.hidden = true;
+    const lab = inp.id && root.querySelector(`label[for="${inp.id}"]`), unit = inp.dataset.unit || "";
+    const title = inp.dataset.title || (lab ? lab.textContent.replace(/\s*\(.*?\)\s*$/, "") : inp.placeholder || "");
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "wpick";
+    const paint = () => { btn.innerHTML = (inp.value !== "" ? `<b>${esc(inp.value)}</b> ${esc(unit)}` : `<span class="muted">${esc(inp.placeholder || "Set")}</span>`) + `<span class="wpick-ch">›</span>`; };
+    paint();
+    if (inp.style.flex) btn.style.flex = inp.style.flex;
+    inp.after(btn);
+    if (lab) lab.htmlFor = "";
+    btn.onclick = () => {
+      const min = +inp.dataset.min || +inp.min || 0, max = +inp.dataset.max || +inp.max || 100, step = +inp.dataset.step || +inp.step || 1;
+      numWheel({ title, unit: "u", value: inp.value, units: { u: { min, max, step, def: +inp.dataset.def || (min + max) / 2, label: unit } },
+        onDone: (v) => {
+          inp.value = v; paint();
+          inp.dispatchEvent(new Event("input", { bubbles: true })); inp.dispatchEvent(new Event("change", { bubbles: true }));
+          const then = inp.dataset.then && document.querySelector(`[data-act="${inp.dataset.then}"]`); if (then) then.click();
+        } });
+    };
+  });
 }
 function athleteFormHTML(id) {
   const a = id ? athletes.find((x) => x.id === id) : { name: "", kg: null };
@@ -2250,6 +2281,7 @@ function render() {
   // each run screen opens at the top, so the status strip and the name are in view
   const ph = view + ":" + cap.phase; if (runOn && ph !== render.last) window.scrollTo(0, 0); render.last = ph;
   const lu = $("#lineup"); if (lu) rosterDrag(lu, lineupDrop, luDrag, "id");
+  wheelify();
   document.querySelectorAll("select[data-pod]").forEach((s) => (s.onchange = () => { const w = settings.podWho || (settings.podWho = {}); if (s.value) w[s.dataset.pod] = s.value; else delete w[s.dataset.pod]; saveSettings(); render(); }));
   lcDrawAll(); liveDraw(); LC = Object.fromEntries(Object.entries(LC).filter(([k]) => document.querySelector(`[data-lc="${k}"]`)));
   const tab = { home: "home", new: "new", run: "sessions", sessions: "sessions", session: "sessions", compare: "analytics", analytics: "analytics", settings: "settings", athlete: "settings", level: "settings", jump: "new", podcal: "settings" }[view];
