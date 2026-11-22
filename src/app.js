@@ -1754,7 +1754,7 @@ function homeHTML() {
   if (!athletes.length) return h + `<div class="card"><b>Start here</b><div class="small muted" style="margin:4px 0 10px">Add the athletes you'll be timing. Body weight is optional and only used for power.</div><button class="btn" data-act="ath-new">Add an athlete</button></div>`;
   // quick numbers
   const tile = (v, k, go) => `<button class="qt" ${go ? `data-go="${go}"` : ""}><b>${v}</b><span>${k}</span></button>`;
-  h += `<div class="qtiles">${tile(today.length, "runs today", "sessions")}${tile(week.length, "this week", "sessions")}${tile(prs.filter((e) => now - e.r.ts < 7 * 864e5).length, "PRs this week", "analytics")}</div>`;
+  h += `<div class="qtiles">${tile(today.length, "runs today", "sessions")}${tile(week.length, "runs this week", "sessions")}${tile(jumps.filter((j) => now - j.ts < 7 * 864e5).length, "jumps this week", "sessions")}${tile(prs.filter((e) => now - e.r.ts < 7 * 864e5).length, "PRs this week", "analytics")}</div>`;
   if (!runs.length) return h + `<div class="card"><b>No runs yet</b><div class="small muted" style="margin-top:4px">Tap New session, pick sprint, vault or vertical jump and who's going, and the sensor does the rest. No sensor yet? Settings → Add demo data.</div></div>`;
   // last session recap
   const lastK = dayKey(runs.reduce((p, q) => (q.ts > p.ts ? q : p)).ts), last = runs.filter((r) => dayKey(r.ts) === lastK);
