@@ -676,46 +676,36 @@ function drawDisplay() {
     fit.style.fontSize = `${Math.floor(100 * k * 0.97)}px`;
   }
 }
-// rearrange the roster: hold a name anywhere (or grab its \u2261 straight away) and drag it up or down (also across the lineup line)
+// rearrange the roster: hold a name anywhere on its card (or grab its \u2261 straight away) and drag it up or down, also across
+// the lineup line. Fingers go through touch events (iPhone Safari cancels pointer events once it thinks you're scrolling,
+// and preventing touchmove is the one thing it always honours); a mouse or pen goes through pointer events.
 function rosterDrag(rs, onDrop, st = disp, attr = "name") {
   let d = null, hold = null, eat = false;
   const items = () => [...rs.children].filter((c) => c.tagName === "BUTTON" || c.classList.contains("d-div"));
-  const start = (it, e) => {
-    d = { it, y: e.clientY, moved: false, gap: parseFloat(getComputedStyle(rs).rowGap) || 0 };
+  const rowOf = (t) => { const it = t && t.closest && t.closest("button"); return it && it.parentElement === rs ? it : null; };
+  const start = (it, y) => {
+    cancelHold();
+    d = { it, y, moved: false, gap: parseFloat(getComputedStyle(rs).rowGap) || 0 };
     st.dragging = true; it.classList.add("drag"); eat = true;
-    try { it.setPointerCapture(e.pointerId); } catch (x) {}
     try { navigator.vibrate && navigator.vibrate(12); } catch (x) {}
   };
   const cancelHold = () => { if (hold) { clearTimeout(hold.t); hold = null; } };
-  rs.addEventListener("pointerdown", (e) => {
-    const it = e.target.closest("button"); if (!it || !rs.contains(it) || it.parentElement !== rs) return;
-    eat = false;
-    if (e.target.closest(".d-grip")) { e.preventDefault(); start(it, e); return; }
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    // anywhere else on the card: a short hold picks it up; moving first means scrolling, so it lets go
-    cancelHold();
-    hold = { x: e.clientX, y: e.clientY, t: setTimeout(() => { hold = null; start(it, e); }, 300) };
-  });
-  // once a name is picked up, the page must not scroll under the finger
-  rs.addEventListener("touchmove", (e) => { if (d) e.preventDefault(); }, { passive: false });
-  rs.addEventListener("contextmenu", (e) => { if (d || hold) e.preventDefault(); });
-  // a drag (or a hold) isn't a tap
-  rs.addEventListener("click", (e) => { if (eat) { e.stopPropagation(); e.preventDefault(); eat = false; } }, true);
-  rs.addEventListener("pointermove", (e) => {
-    if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) cancelHold();
+  const arm = (it, x, y) => { cancelHold(); eat = false; hold = { x, y, t: setTimeout(() => { const h = hold; hold = null; if (h) start(it, h.y); }, 280) }; };
+  const move = (x, y) => {
+    if (hold && Math.hypot(x - hold.x, y - hold.y) > 10) cancelHold();
     if (!d) return;
     // near the top or bottom edge: scroll the list along
     const box = rs.getBoundingClientRect(), edge = 50;
-    const toward = e.clientY - d.y;
-    const sc = e.clientY < box.top + edge && toward < -20 ? -10 : e.clientY > box.bottom - edge && toward > 20 ? 10 : 0;
+    const toward = y - d.y;
+    const sc = y < box.top + edge && toward < -20 ? -10 : y > box.bottom - edge && toward > 20 ? 10 : 0;
     if (sc) { const before = rs.scrollTop; rs.scrollTop += sc; d.y -= rs.scrollTop - before; }
-    let dy = e.clientY - d.y; if (Math.abs(dy) > 4) d.moved = true;
+    let dy = y - d.y; if (Math.abs(dy) > 4) d.moved = true;
     const list = items(), i = list.indexOf(d.it), r = d.it.getBoundingClientRect(), mid = r.top + r.height / 2 - (parseFloat(d.it.style.transform.slice(11)) || 0) + dy;
     const next = list[i + 1], prev = list[i - 1];
     if (next) { const nr = next.getBoundingClientRect(); if (mid > nr.top + nr.height / 2) { rs.insertBefore(next, d.it); d.y += nr.height + d.gap; } }
     if (prev) { const pr = prev.getBoundingClientRect(); if (mid < pr.top + pr.height / 2) { rs.insertBefore(d.it, prev); d.y -= pr.height + d.gap; } }
-    dy = e.clientY - d.y; d.it.style.transform = `translateY(${dy}px)`;
-  });
+    dy = y - d.y; d.it.style.transform = `translateY(${dy}px)`;
+  };
   const end = () => {
     cancelHold();
     if (!d) return;
@@ -727,7 +717,28 @@ function rosterDrag(rs, onDrop, st = disp, attr = "name") {
     const div = list.findIndex((c) => c.classList.contains("d-div"));
     onDrop(order, div >= 0 ? div : order.length);
   };
-  rs.addEventListener("pointerup", end); rs.addEventListener("pointercancel", end);
+  // fingers
+  rs.addEventListener("touchstart", (e) => {
+    const it = rowOf(e.target); if (!it || e.touches.length > 1) { cancelHold(); return; }
+    const t = e.touches[0];
+    if (e.target.closest(".d-grip")) { e.preventDefault(); eat = false; start(it, t.clientY); return; }
+    arm(it, t.clientX, t.clientY);
+  }, { passive: false });
+  rs.addEventListener("touchmove", (e) => { const t = e.touches[0]; if (d) e.preventDefault(); move(t.clientX, t.clientY); }, { passive: false });
+  rs.addEventListener("touchend", end); rs.addEventListener("touchcancel", end);
+  // mouse and pen
+  rs.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") return;
+    const it = rowOf(e.target); if (!it || e.button !== 0) return;
+    if (e.target.closest(".d-grip")) { e.preventDefault(); eat = false; start(it, e.clientY); } else arm(it, e.clientX, e.clientY);
+    try { rs.setPointerCapture(e.pointerId); } catch (x) {}
+  });
+  rs.addEventListener("pointermove", (e) => { if (e.pointerType !== "touch") move(e.clientX, e.clientY); });
+  rs.addEventListener("pointerup", (e) => { if (e.pointerType !== "touch") end(); });
+  rs.addEventListener("pointercancel", (e) => { if (e.pointerType !== "touch") end(); });
+  rs.addEventListener("contextmenu", (e) => { if (d || hold) e.preventDefault(); });
+  // a drag (or a hold) isn't a tap
+  rs.addEventListener("click", (e) => { if (eat) { e.stopPropagation(); e.preventDefault(); eat = false; } }, true);
 }
 function devicesCardHTML() {
   if (WEB_COPY) return "";
