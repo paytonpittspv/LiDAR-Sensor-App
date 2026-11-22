@@ -1441,7 +1441,7 @@ function jumpHTML() {
 let view = "home", viewArg = null;
 function go(v, arg, resume) {
   view = v; viewArg = arg == null ? null : arg;
-  // New rep opens on its first page (sprint or vault, who's running, where to stop) unless a run is being recorded
+  // New session opens on its first page (sprint or vault, who's running, where to stop) unless a run is being recorded
   // right now, or you're coming back to it (from adding an athlete, say): then it stays where you were
   if (v === "new" && !resume && cap.phase !== "recording" && cap.phase !== "processing" && cap.phase !== "summary") { if (cap.phase === "ready") stopNow(); cap.phase = "setup"; cap.step = "event"; cap.error = null; }
   render(); window.scrollTo(0, 0);
@@ -1526,15 +1526,15 @@ function homeHTML() {
   const hs = !sensor.connected ? ["d-dim", "No sensor", ""] : noLidar ? ["d-amber", "No LiDAR signal", ""] : ["d-green", "Sensor ready", sensor.phones > 1 ? `${sensor.phones} devices` : ""];
   h += `<div class="card home-sensor"><div class="st-strip ${hs[0]}"><span>${hs[1]}</span><span>${hs[2]}</span></div><div class="hs-body">
       ${sensor.connected && !noLidar ? `<div class="between" style="align-items:flex-end"><div><div class="label">Distance</div><div class="hs-d"><span data-live>${sensor.d != null ? sensor.d.toFixed(2) : "—"}</span><small>m</small></div></div><div class="small muted" style="text-align:right">${sensor.rate} readings/s</div></div>`
-        : `<div class="small muted">${noLidar ? "Connected, but the LiDAR isn't sending anything. Check its cable and the power bank." : WEB_COPY ? `This copy can't reach the sensor. To record, join the SpeedLidar Wi-Fi and open ${SECURE_HOST} (or 192.168.4.1). New rep here is a simulated practice run.` : "Join the SpeedLidar Wi-Fi to record."}</div>`}
-    <button class="btn big primary" style="margin-top:14px" data-go="new">New rep</button>
+        : `<div class="small muted">${noLidar ? "Connected, but the LiDAR isn't sending anything. Check its cable and the power bank." : WEB_COPY ? `This copy can't reach the sensor. To record, join the SpeedLidar Wi-Fi and open ${SECURE_HOST} (or 192.168.4.1). New session here is a simulated practice run.` : "Join the SpeedLidar Wi-Fi to record."}</div>`}
+    <button class="btn big primary" style="margin-top:14px" data-go="new">New session</button>
     ${settings.podSeen ? `<button class="btn" style="margin-top:10px;width:100%" data-act="go-jump">Jump test${sensor.pod && sensor.pod.on ? "" : " · pod not connected"}</button>` : ""}</div></div>`;
   h += sendCardHTML(true) + (WEB_COPY ? getCardHTML() : "");
   if (!athletes.length) return h + `<div class="card"><b>Start here</b><div class="small muted" style="margin:4px 0 10px">Add the athletes you'll be timing. Body weight is optional and only used for power.</div><button class="btn" data-act="ath-new">Add an athlete</button></div>`;
   // quick numbers
   const tile = (v, k, go) => `<button class="qt" ${go ? `data-go="${go}"` : ""}><b>${v}</b><span>${k}</span></button>`;
   h += `<div class="qtiles">${tile(today.length, "runs today", "sessions")}${tile(week.length, "this week", "sessions")}${tile(prs.filter((e) => now - e.r.ts < 7 * 864e5).length, "PRs this week", "analytics")}</div>`;
-  if (!runs.length) return h + `<div class="card"><b>No runs yet</b><div class="small muted" style="margin-top:4px">Tap New rep, pick sprint, vault or vertical jump and who's going, and the sensor does the rest. No sensor yet? Settings → Add demo data.</div></div>`;
+  if (!runs.length) return h + `<div class="card"><b>No runs yet</b><div class="small muted" style="margin-top:4px">Tap New session, pick sprint, vault or vertical jump and who's going, and the sensor does the rest. No sensor yet? Settings → Add demo data.</div></div>`;
   // last session recap
   const lastK = dayKey(runs.reduce((p, q) => (q.ts > p.ts ? q : p)).ts), last = runs.filter((r) => dayKey(r.ts) === lastK);
   const byA = {}; for (const r of last) (byA[r.athleteId] = byA[r.athleteId] || []).push(r);
@@ -1559,7 +1559,7 @@ function homeHTML() {
   return h;
 }
 
-// ---------------- New rep: one question at a time ----------------
+// ---------------- New session: one question at a time ----------------
 // Event → Distance (sprint: where to stop; vault: distance and sensor placement) → Who's running → Get ready.
 // Chime, voice and Hands Free live in Settings so setting up a run stays quick.
 const WIZ = ["event", "distance", "who"];
