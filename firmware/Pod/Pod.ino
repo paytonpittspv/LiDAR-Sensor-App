@@ -24,7 +24,8 @@
 #include <Preferences.h>
 #include <esp_sleep.h>
 
-static const char* FW = "pod-1.2";
+static const char* FW = "pod-1.3";
+char podId[8] = "pod";                      // the end of this pod's Wi-Fi address: tells the sensor which pod is which
 static const char* SSID = "SpeedLidar";
 static const char* PASS = "vault1234";
 static const char* SENSOR = "http://192.168.4.1";
@@ -198,7 +199,7 @@ bool pushCapture() {
     {{'P', 'O', 'D', '1'}, 1, (uint16_t)HZ, count, ++seq, (uint32_t)((calibrated ? 1 : 0) | 2 /* averaged */), ACC_LSB, GYR_LSB, 0};
   memcpy(buf, &hd, 32);
   for (uint32_t i = 0; i < count; i++) ((Sample*)(buf + 32))[i] = ring[(h - count + i) % RING];
-  HTTPClient http; http.begin(String(SENSOR) + "/pod/push"); http.addHeader("Content-Type", "application/octet-stream"); http.setTimeout(8000);
+  HTTPClient http; http.begin(String(SENSOR) + "/pod/push?id=" + podId); http.addHeader("Content-Type", "application/octet-stream"); http.setTimeout(8000);
   int code = http.POST(buf, len); http.end(); free(buf);
   return code == 200;
 }
@@ -210,7 +211,7 @@ uint8_t phaseNow() {
 void hello() {
   HTTPClient http; http.setTimeout(1500);
   char q[240];
-  snprintf(q, sizeof q, "%s/pod/hello?fw=%s&imu=%d&cal=%d&sides=%u&rssi=%d&still=%d&ph=%u&v=%d&up=%lu&msg=%s", SENSOR, FW, imuOk ? 1 : 0, calibrated ? 1 : 0,
+  snprintf(q, sizeof q, "%s/pod/hello?id=%s&fw=%s&imu=%d&cal=%d&sides=%u&rssi=%d&still=%d&ph=%u&v=%d&up=%lu&msg=%s", SENSOR, podId, FW, imuOk ? 1 : 0, calibrated ? 1 : 0,
            (unsigned)sidesDone, WiFi.RSSI(), stillRun >= (uint32_t)HZ ? 1 : 0, (unsigned)phaseNow(), (int)lrintf(liveV * 100.f), (unsigned long)(millis() / 1000), lastMsg.c_str());
   http.begin(q);
   if (http.GET() != 200) { http.end(); return; }
@@ -251,8 +252,10 @@ void setup() {
   if (!imuOk) Serial.println("No BMI160: check its wires");
   lastMove = millis();
   xTaskCreatePinnedToCore(readerTask, "imu", 4096, nullptr, 5, nullptr, 1);
-  WiFi.mode(WIFI_STA); WiFi.setHostname("speedpod"); WiFi.begin(SSID, PASS);
-  ArduinoOTA.setHostname("speedpod"); ArduinoOTA.setPassword(PASS); ArduinoOTA.begin();
+  WiFi.mode(WIFI_STA);
+  { uint8_t m[6]; WiFi.macAddress(m); snprintf(podId, sizeof podId, "%02x%02x%02x", m[3], m[4], m[5]); }
+  WiFi.setHostname((String("speedpod-") + podId).c_str()); WiFi.begin(SSID, PASS);
+  ArduinoOTA.setHostname((String("speedpod-") + podId).c_str()); ArduinoOTA.setPassword(PASS); ArduinoOTA.begin();
 }
 
 void loop() {

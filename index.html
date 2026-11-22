@@ -538,6 +538,12 @@ html.disp-on,html.disp-on body{overflow:hidden}
 .jrank .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.jrank .v{text-align:right;font-weight:800;font-variant-numeric:tabular-nums}
 .jrank .bar{height:14px;border-radius:7px;background:var(--tint-strong);overflow:hidden}.jrank .bar b{display:block;height:100%;border-radius:7px;background:var(--muted);opacity:.55}
 .jrank.me .bar b{background:linear-gradient(90deg,var(--pink),var(--purple),var(--blue));opacity:1}.jrank.me .nm{color:var(--purple)}
+.pdot{display:inline-block;width:12px;height:12px;border-radius:50%;flex:none}
+.pcolors{display:flex;gap:8px}.pcolors button{width:26px;height:26px;border-radius:50%;border:3px solid transparent;cursor:pointer;padding:0}
+.pcolors button[aria-pressed="true"]{border-color:var(--text);box-shadow:0 0 0 2px var(--bg) inset}
+.pods{display:flex;flex-direction:column;gap:10px}.prow{display:flex;align-items:center;gap:10px}
+.prow .pname{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
+.prow select{max-width:48%;min-height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;padding:0 8px}
 .jump-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}.jump-two .jump-big{font-size:clamp(34px,11vw,52px)}
 .jump-big{font-family:var(--display);font-weight:800;font-size:64px;line-height:1;margin:4px 0}
 .jump-big small{font-size:22px;color:var(--muted);margin-left:6px}
@@ -1566,7 +1572,7 @@ async function poll() {
     sensor.arm = j.arm != null ? j.arm : null; sensor.cfg = j.cfg || ""; sensor.phones = j.phones || 0; sensor.fw = j.fw || "";
     sensor.role = j.role || "control";
     sensor.imu = !!j.imu; sensor.bump = !!j.bump; sensor.bumpDeg = j.bumpDeg || 0; sensor.bumpWhy = j.bumpWhy || "";
-    sensor.pod = j.pod || null; podWatch();
+    sensor.pod = j.pod || null; sensor.pods = j.pods || (j.pod ? [Object.assign({ id: "pod" }, j.pod)] : []); podWatch();
     if (j.pick != null) { sensor.pick = j.pick; sensor.pickName = j.pickName || ""; takePick(); }
     if (j.order != null) { sensor.order = j.order; takeOrder(); }
     // the first device on the sensor is the controller; any other one turns into the big display
@@ -2735,55 +2741,79 @@ function parsePod(buf) {
   }
   return r;
 }
-function podWatch() {
-  const P = sensor.pod; if (!P || cap.sim) return;
-  if (P.on && !settings.podSeen) { settings.podSeen = true; saveSettings(); }
-  if (pod.msgSeq !== null && P.msgSeq !== pod.msgSeq && P.msg) podMessage(P.msg);
-  pod.msgSeq = P.msgSeq;
-  if (view === "jump" && pod.simPh == null) {
-    const ph = P.on ? P.ph || 0 : -1;
-    // the result stays until the pod has moved (handed over, or walked back) and someone stands still with it again
-    if (pod.show) { if (ph === 0) pod.sawMove = true; else if (ph === 1 && pod.sawMove && Date.now() - pod.showAt > 3000) { pod.show = null; pod.lastPh = null; } }
-    if (ph !== pod.lastPh) {
-      // takeoff: the pod sends its takeoff speed about 80 ms into the flight (plus Wi-Fi); the bar flies from there
-      if (ph === 2) pod.air = P.v ? { v: P.v / 100, t0: performance.now() - 120 } : null;
-      pod.lastPh = ph; if (!luDrag.dragging) render(); if (pod.air) airTick();
-    }
-  }
-  if (pod.seq === null) { pod.seq = P.seq; return; }       // what was there before the app opened isn't new
-  if (P.seq !== pod.seq && !pod.busy) { pod.seq = P.seq; podFetch(); }
+// several pods at once: each has an id (from the sensor), a colour you pick, and optionally who wears it
+const podSt = {};
+const pst = (id) => podSt[id] || (podSt[id] = { seq: null, msgSeq: null, lastPh: null, busy: false });
+const POD_COLORS = { blue: ["Blue", "var(--blue)"], purple: ["Purple", "var(--purple)"], pink: ["Pink", "var(--pink)"], green: ["Green", "#16a34a"] };
+function podColor(id) {
+  const c = settings.podColors || (settings.podColors = {});
+  if (!c[id] || !POD_COLORS[c[id]]) { const used = Object.values(c); c[id] = Object.keys(POD_COLORS).find((k) => !used.includes(k)) || "blue"; saveSettings(); }
+  return c[id];
 }
-function podMessage(m) {
-  const [what, res] = m.split(":");
+const podName = (id) => `${POD_COLORS[podColor(id)][0]} pod`, podCss = (id) => POD_COLORS[podColor(id)][1];
+const podDot = (id) => `<span class="pdot" style="background:${podCss(id)}"></span>`;
+const podsAll = () => (sensor.connected ? sensor.pods || [] : []), podsOn = () => podsAll().filter((p) => p.on);
+// who's wearing this pod (an athlete id), or null: whoever is up in the lineup
+const podWho = (id) => { const w = (settings.podWho || {})[id]; return w && athletes.some((a) => a.id === w) ? w : null; };
+const podWearer = (id) => (id && podWho(id)) || cap.athleteId;
+function podWatch() {
+  if (cap.sim) return;
+  let redraw = false;
+  for (const P of sensor.pods || []) {
+    const st = pst(P.id);
+    if (P.on && !settings.podSeen) { settings.podSeen = true; saveSettings(); }
+    if (st.msgSeq !== null && P.msgSeq !== st.msgSeq && P.msg) podMessage(P.msg, P.id);
+    st.msgSeq = P.msgSeq;
+    if (view === "jump" && pod.simPh == null) {
+      const ph = P.on ? P.ph || 0 : -1, shownPod = pod.show && (jumps.find((j) => j.id === pod.show) || {}).pod;
+      // the result stays until someone is set to jump again: on the same pod, only once it has moved first (handed over, or walked back)
+      if (pod.show && P.id === shownPod && ph === 0) pod.sawMove = true;
+      if (ph !== st.lastPh) {
+        if (pod.show && ph === 1 && (P.id !== shownPod || pod.sawMove) && Date.now() - pod.showAt > 3000) pod.show = null;
+        if (ph >= 1 && ph <= 3) pod.focus = P.id;
+        // takeoff: the pod sends its takeoff speed about 80 ms into the flight (plus Wi-Fi); the bar flies from there
+        if (ph === 2) pod.air = P.v ? { v: P.v / 100, t0: performance.now() - 120, who: podWearer(P.id) } : null;
+        st.lastPh = ph; redraw = true;
+      }
+    }
+    if (st.seq === null) { st.seq = P.seq; continue; }       // what was there before the app opened isn't new
+    if (P.seq !== st.seq && !st.busy) { st.seq = P.seq; podFetch(P.id); }
+  }
+  if (redraw) { if (!luDrag.dragging) render(); if (pod.air) airTick(); }
+}
+function podMessage(m, id) {
+  const [what, res] = m.split(":"), who = (sensor.pods || []).length > 1 ? `${podName(id)}: ` : "";
   if (what.startsWith("cal")) {
     pod.calMsg = res === "ok" ? "Got that side." : res === "done" ? "Calibrated. All six sides measured." : res === "moved" ? "It moved: hold it still on that side and try again." : res === "sides" ? "Some sides were missing or the same twice: start again with all six." : "";
-    toast(pod.calMsg); if (view === "settings" || view === "podcal") render();
-  } else if (what === "update") { pod.fwMsg = res === "ok" ? "The pod updated and restarted." : "The pod couldn't update. Try again."; toast(pod.fwMsg); render(); }
+    toast(who + pod.calMsg); if (view === "settings" || view === "podcal") render();
+  } else if (what === "update") { pod.fwMsg = who + (res === "ok" ? "updated and restarted." : "couldn't update. Try again."); toast(pod.fwMsg); render(); }
   else if (what === "uncal") { pod.calMsg = "Calibration cleared."; render(); }
 }
-async function podFetch() {
-  pod.busy = true; if (view === "jump") render();
+async function podFetch(id) {
+  const st = pst(id); st.busy = true; pod.focus = id; if (view === "jump") render();
   try {
-    const rec = parsePod(await (await fetch("/pod/data", { cache: "no-store" })).arrayBuffer());
+    const rec = parsePod(await (await fetch(`/pod/data?id=${encodeURIComponent(id)}`, { cache: "no-store" })).arrayBuffer());
     if (!rec) return;
     pod.last = rec;
-    if (view === "jump") podJump(rec); else podVault(rec);
-  } catch (e) {} finally { pod.busy = false; }
+    if (view === "jump") podJump(rec, false, id); else podVault(rec);
+  } catch (e) {} finally { st.busy = false; }
 }
-function podJump(rec, sim) {
+function podJump(rec, sim, podId) {
   const R = PodEngine.analyzeJump(rec);
   pod.lastRes = R;
   if (!R.ok) { toast(R.why); render(); return; }
   jumpInit();
-  const a = cap.athleteId || settings.lastAthlete || (athletes[0] && athletes[0].id);
-  const j = { id: uid(), ts: Date.now(), athleteId: a, h: R.height, hStand: R.heightStanding, hFlight: R.heightFlight, t: R.flightTime, agree: R.agree, cal: rec.calibrated, sim: !!sim };
+  const worn = podId && podWho(podId), a = worn || cap.athleteId || settings.lastAthlete || (athletes[0] && athletes[0].id);
+  const j = { id: uid(), ts: Date.now(), athleteId: a, h: R.height, hStand: R.heightStanding, hFlight: R.heightFlight, t: R.flightTime, agree: R.agree, cal: rec.calibrated, sim: !!sim, pod: podId || null };
   jumps.unshift(j); saveJumps();
-  // the result stays up (see jumpHTML); whoever is next is lined up behind it
+  // the result stays up (see jumpHTML); whoever is next is lined up behind it (a pod someone wears keeps them)
   pod.show = j.id; pod.showAt = Date.now(); pod.sawMove = false; pod.air = null;
-  pod.turn = (pod.turn || 0) + 1;
-  if (pod.turn >= (settings.jumpEach || 1)) { pod.turn = 0; if (cap.queue.length > 1 && cap.queue.includes(a)) cap.athleteId = cap.queue[(cap.queue.indexOf(a) + 1) % cap.queue.length]; }
+  if (!worn) {
+    pod.turn = (pod.turn || 0) + 1;
+    if (pod.turn >= (settings.jumpEach || 1)) { pod.turn = 0; if (cap.queue.length > 1 && cap.queue.includes(a)) cap.athleteId = cap.queue[(cap.queue.indexOf(a) + 1) % cap.queue.length]; }
+  }
   settings.lastAthlete = cap.athleteId; saveSettings();
-  say(`${podIn() ? (R.height / 0.0254).toFixed(1) + " inches" : (R.height * 100).toFixed(0) + " centimeters"}`);
+  say(`${(podsOn().length > 1 ? firstName(a) + ", " : "")}${(R.height * 100).toFixed(0)} centimeters`);
   render();
 }
 function podVault(rec) {
@@ -2797,50 +2827,53 @@ function podVault(rec) {
   render();
 }
 function podCmd(body) {
-  return fetch("/pod/cmd", { method: "POST", body: new URLSearchParams(body), cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.online) toast("The pod isn't connected: switch it on near the sensor."); return j; }).catch(() => toast("Couldn't reach the sensor."));
+  return fetch("/pod/cmd", { method: "POST", body: new URLSearchParams(Object.fromEntries(Object.entries(body).filter(([, v]) => v != null && v !== ""))), cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.online) toast("That pod isn't connected: switch it on near the sensor."); return j; }).catch(() => toast("Couldn't reach the sensor."));
 }
 function podFirmware(file) {
   if (!file) return;
   if (!/\.bin$/i.test(file.name) || file.size < 100000) { toast("Pick the Pod.bin file."); return; }
   pod.fwMsg = "Sending to the sensor…"; render();
   fetch("/pod/fw", { method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" }, cache: "no-store" }).then((r) => r.json())
-    .then((j) => { pod.fwMsg = j.ok ? "Handed to the sensor. The pod picks it up within a few seconds, updates and restarts (about 20 s)." : `Couldn't send it${j.error ? `: ${j.error}` : ""}.`; render(); })
+    .then((j) => { pod.fwMsg = j.ok ? `Handed to the sensor. ${j.pods > 1 ? `All ${j.pods} pods pick` : "The pod picks"} it up within a few seconds, updates and restarts (about 20 s).` : `Couldn't send it${j.error ? `: ${j.error}` : ""}.`; render(); })
     .catch(() => { pod.fwMsg = "Couldn't reach the sensor."; render(); });
 }
-function podStatusLine() {
-  const P = sensor.pod;
-  if (!sensor.connected) return "Connect to the sensor to see the pod.";
-  if (!P || !P.on) return "Not connected. Switch the pod on near the sensor (shake it to wake it).";
+function podStatusLine(P) {
+  if (!sensor.connected) return "Connect to the sensor to see the pods.";
+  if (!P || !P.on) return "Not connected. Switch it on near the sensor (shake it to wake it).";
   if (!P.imu) return "Connected, but its motion sensor isn't answering: check the BMI160's wires.";
   return `Connected · ${P.cal ? "calibrated" : "<b style=\"color:var(--warn)\">not calibrated</b>"} · signal ${P.rssi} dBm · ${esc(P.fw)}`;
 }
 // Settings card
 function podCardHTML() {
   const unit = lvImperial() ? "in" : "cm", v = lvImperial() ? Math.round(podRest() / 0.0254) : Math.round(podRest() * 100);
-  // this copy of the app can't reach the pod (it talks to the sensor): what works here, and where the rest lives
-  if (WEB_COPY) return `<div class="card"><div class="label">Waist pod</div>
-    <div class="small muted" style="margin:4px 0 10px">The pod talks to the sensor, so its status, calibration and updates are on the sensor's page (join the SpeedLidar Wi-Fi). The Jump test works here with simulated jumps.</div>
-    <div class="row" style="margin-bottom:10px"><button class="btn" data-act="go-jump">Jump test</button></div>
-    <div class="field" style="margin:0"><label for="podRest">Pod height lying on the mat (${unit})</label><input type="number" inputmode="decimal" id="podRest" value="${v}"></div></div>`;
-  return `<div class="card"><div class="label">Waist pod</div>
-    <div class="small" style="margin:4px 0 10px">${podStatusLine()}</div>
-    <div class="row" style="margin-bottom:10px"><button class="btn" data-act="go-jump">Jump test</button><button class="btn" data-act="go-podcal">Calibrate</button><button class="btn ghost" data-act="pod-send">Send a test recording</button></div>
-    <div class="field"><label for="podRest">Pod height lying on the mat (${unit})</label><input type="number" inputmode="decimal" id="podRest" value="${v}"></div>
-    <div class="small muted" style="margin:-4px 0 10px">Lie on the landing mat the way you land, pod on, and measure from the ground to the pod. The vault's peak height is worked out from there, so measure it once carefully.</div>
-    <div class="small muted" style="margin-bottom:8px">Pod firmware: with internet, <a href="${POD_FW_URL}">download Pod.bin</a>; then on the SpeedLidar Wi-Fi, pick it here. The sensor hands it to the pod.</div>
-    <label class="btn" style="cursor:pointer">Update the pod<input type="file" id="podFwFile" accept=".bin,application/octet-stream" class="hidden"></label>
+  const rest = `<div class="field" style="margin:0"><label for="podRest">Pod height lying on the mat (${unit})</label><input type="number" inputmode="decimal" id="podRest" value="${v}"></div>`;
+  // this copy of the app can't reach the pods (they talk to the sensor): what works here, and where the rest lives
+  if (WEB_COPY) return `<div class="card"><div class="label">Waist pods</div>
+    <div class="small muted" style="margin:4px 0 10px">The pods talk to the sensor, so their status, calibration and updates are on the sensor's page (join the SpeedLidar Wi-Fi). The Jump test works here with simulated jumps.</div>
+    <div class="row" style="margin-bottom:10px"><button class="btn" data-act="go-jump">Jump test</button></div>${rest}</div>`;
+  const list = podsAll();
+  let h = list.length ? list.map((P) => `<div class="card"><div class="between"><div class="label" style="display:flex;align-items:center;gap:8px">${podDot(P.id)}${podName(P.id)}</div>
+      <div class="pcolors">${Object.entries(POD_COLORS).map(([k, [nm, css]]) => `<button data-act="pod-color" data-id="${P.id}" data-v="${k}" aria-label="${nm}" aria-pressed="${podColor(P.id) === k}" style="background:${css}"></button>`).join("")}</div></div>
+      <div class="small" style="margin:6px 0 10px">${podStatusLine(P)}</div>
+      <div class="row"><button class="btn" data-act="go-podcal" data-id="${P.id}">Calibrate</button><button class="btn ghost" data-act="pod-send" data-id="${P.id}">Send a test recording</button></div></div>`).join("")
+    : `<div class="card"><div class="small muted">${sensor.connected ? "No pod connected. Switch one on near the sensor (shake it to wake it)." : "Connect to the sensor to see the pods."}</div></div>`;
+  h += `<div class="card"><div class="row" style="margin-bottom:10px"><button class="btn" data-act="go-jump">Jump test</button></div>${rest}
+    <div class="small muted" style="margin:6px 0 10px">Lie on the landing mat the way you land, pod on, and measure from the ground to the pod. The vault's peak height is worked out from there, so measure it once carefully.</div>
+    <div class="small muted" style="margin-bottom:8px">Pod firmware: with internet, <a href="${POD_FW_URL}">download Pod.bin</a>; then on the SpeedLidar Wi-Fi, pick it here. The sensor hands it to every pod.</div>
+    <label class="btn" style="cursor:pointer">Update the pods<input type="file" id="podFwFile" accept=".bin,application/octet-stream" class="hidden"></label>
     ${pod.fwMsg ? `<div class="small" style="margin-top:8px">${esc(pod.fwMsg)}</div>` : ""}</div>`;
+  return h;
 }
 // 6-side calibration: once, with the pod on a table
 const POD_SIDES = ["Dome up, flat on its base", "Dome down (prop it so it can't rock)", "On one long side", "On the other long side", "Standing on the USB-C end", "Standing on the battery end"];
-function podCalHTML() {
-  const P = sensor.pod || {}, done = P.sides || 0, next = POD_SIDES.findIndex((_, i) => !(done & (1 << i)));
-  let h = `<button class="btn sm" data-act="back">‹ Back</button><h1 style="margin-top:10px">Calibrate the pod</h1>
-    <div class="card"><div class="small" style="margin-bottom:8px">${podStatusLine()}</div>
+function podCalHTML(id) {
+  const P = podsAll().find((p) => p.id === id) || podsOn()[0] || podsAll()[0], pid = P ? P.id : "", done = (P && P.sides) || 0, next = POD_SIDES.findIndex((_, i) => !(done & (1 << i)));
+  let h = `<button class="btn sm" data-act="back">‹ Back</button><h1 style="margin-top:10px;display:flex;align-items:center;gap:10px">${P ? `${podDot(pid)}Calibrate the ${podName(pid).toLowerCase()}` : "Calibrate the pod"}</h1>
+    <div class="card"><div class="small" style="margin-bottom:8px">${podStatusLine(P)}</div>
     <div class="small muted">Once, on a table. It measures the motion sensor's own small errors on each axis, which is what makes the vault height accurate (without it, a vault can be off by 10 cm or more). Set the pod on each of its six sides in turn, let go so it's still, and tap Measure. Any order works; propping it with something is fine.</div></div>
-    <div class="card list">${POD_SIDES.map((t, i) => `<div class="item"><div><b>${i + 1}. ${t}</b></div><div class="r">${done & (1 << i) ? `<span class="pill ok">✓</span>` : `<button class="btn sm${i === next ? " primary" : ""}" data-act="pod-cal" data-v="${i}">Measure</button>`}</div></div>`).join("")}</div>
+    <div class="card list">${POD_SIDES.map((t, i) => `<div class="item"><div><b>${i + 1}. ${t}</b></div><div class="r">${done & (1 << i) ? `<span class="pill ok">✓</span>` : `<button class="btn sm${i === next ? " primary" : ""}" data-act="pod-cal" data-id="${pid}" data-v="${i}">Measure</button>`}</div></div>`).join("")}</div>
     ${pod.calMsg ? `<div class="card"><b>${esc(pod.calMsg)}</b></div>` : ""}
-    <button class="btn ghost" data-act="pod-uncal">Clear the calibration</button>`;
+    <button class="btn ghost" data-act="pod-uncal" data-id="${pid}">Clear the calibration</button>`;
   return h;
 }
 // Jump test page: laid out like the sprint/vault run screen (stage + lineup)
@@ -2851,21 +2884,22 @@ function jumpInit() {
 }
 function jumpHTML() {
   jumpInit();
-  const P = sensor.pod, podOn = sensor.connected && P && P.on && P.imu;
-  const ph = pod.simPh != null ? pod.simPh : pod.busy ? 4 : podOn ? P.ph || 0 : -1;
-  const a = cap.athleteId && athletes.find((x) => x.id === cap.athleteId), name = esc(a ? a.name : "");
+  const on = podsOn(), P = on.find((p) => p.id === pod.focus) || on[0], podOn = !!(P && P.imu);
+  const ph = pod.simPh != null ? pod.simPh : P && pst(P.id).busy ? 4 : podOn ? P.ph || 0 : -1;
+  const wid = pod.simPh != null ? cap.athleteId : podWearer(P && P.id), a = wid && athletes.find((x) => x.id === wid), name = esc(a ? a.name : "");
   const today = jumps.filter((j) => dayKey(j.ts) === dayKey(Date.now()));
   const shown = pod.show && jumps.find((j) => j.id === pod.show);
   const stage = (color, left, right, body, cls = "") => `<section class="stage short ${cls}"><div class="st-strip ${color}"><span>${left}</span><span>${right}</span></div><div class="st-body">${body}</div></section>`;
-  const upNow = (cue) => `<div class="st-label">Up now</div><div class="st-name">${name}</div><div class="st-ev">${cue}</div>`;
+  const upNow = (cue) => `<div class="st-label">Up now${P && on.length > 1 ? ` · <span style="color:${podCss(P.id)}">${podName(P.id)}</span>` : ""}</div><div class="st-name">${name}</div><div class="st-ev">${cue}</div>`;
   let h = `<div class="between" style="margin-bottom:10px"><button class="btn sm" data-act="back">‹ Back</button><span class="small muted">Vertical jump</span></div>`;
   if (!athletes.length) h += stage("d-amber", "No athletes", "", `<div class="st-ev" style="color:var(--text)">Add who's jumping first.</div>`);
   else if (shown) {
     const who = esc(athleteById(shown.athleteId).name);
-    h += stage("d-blue", "Result", who, `<div class="st-label">Takeoff to peak${shown.sim ? " · simulated" : ""}</div><div class="st-big" style="color:var(--blue)">${fmtJump(shown.h)}<small>cm</small></div>
+    h += stage("d-blue", "Result", who, `<div class="st-label">Takeoff to peak${shown.sim ? " · simulated" : ""}${shown.pod && on.length > 1 ? ` · <span style="color:${podCss(shown.pod)}">${podName(shown.pod)}</span>` : ""}</div><div class="st-big" style="color:var(--blue)">${fmtJump(shown.h)}<small>cm</small></div>
       <div class="st-ev">${shown.hStand != null ? `Standing to peak <b style="color:var(--text)">${fmtJump(shown.hStand)} cm</b> · ` : ""}${fmtJumpAlt(shown.h)}</div>
       <div class="small muted" style="margin-top:8px">A jump mat would read ${fmtJump(shown.hFlight)} cm (flight ${shown.t.toFixed(3)} s)${shown.agree ? "" : ": higher because of the lower landing, which doesn't change the numbers above"}${shown.cal ? "" : " · pod not calibrated"}</div>`);
-    h += `<div class="card between"><div><div class="small muted">Next up</div><b style="font-size:20px">${name}</b><div class="small muted">${podOn ? "Switches when they stand still with the pod on" : ""}</div></div><button class="btn primary" data-act="jump-next">Next ›</button></div>`;
+    const nx = athletes.find((x) => x.id === cap.athleteId);
+    h += `<div class="card between"><div><div class="small muted">Next up</div><b style="font-size:20px">${esc(nx ? nx.name : "")}</b><div class="small muted">${podOn ? "Switches when someone stands still with a pod on" : ""}</div></div><button class="btn primary" style="white-space:nowrap" data-act="jump-next">Next ›</button></div>`;
   } else if (ph === -1) h += stage("d-amber", WEB_COPY || !sensor.connected ? "No pod" : "Waiting for the pod", "", upNow("No pod connected. Try it with a simulated jump."));
   else if (ph === 0) h += stage("d-green", "Ready", "Pod on", upNow(`<span class="st-cue">Stand still to start</span>`));
   else if (ph === 1) h += stage("d-pink", "Set", name, `<div class="st-go"><div>Jump when</div><div class="pk">ready</div></div>`, "armed");
@@ -2875,6 +2909,10 @@ function jumpHTML() {
   else h += stage("d-blue", "Jump done", name, `<div class="st-center"><div class="st-xl st-pulse">Working it out</div></div>`);
   if (!podOn && athletes.length && pod.simPh == null) h += `<div class="card"><button class="btn${shown ? "" : " primary"}" style="width:100%" data-act="jump-sim">Simulate a jump · ${esc(firstName(cap.athleteId))}</button></div>`;
   if (pod.lastRes && !pod.lastRes.ok && !shown && pod.simPh == null) h += `<div class="card"><b>${esc(pod.lastRes.why)}</b></div>`;
+  // the pods, and who's wearing each (someone for good, or whoever is up in the lineup)
+  if (on.length) h += `<div class="card pods">${on.map((p) => { const w = podWho(p.id), pp = p.ph || 0;
+    return `<div class="prow">${podDot(p.id)}<div class="pname"><b>${podName(p.id)}</b><span class="small muted">${!p.imu ? "sensor not answering" : pst(p.id).busy ? "working it out" : ["moving", "set", "in the air", "landed"][pp] || ""}${p.cal ? "" : " · not calibrated"}</span></div>
+      <select data-pod="${p.id}" aria-label="Who's wearing the ${podName(p.id)}"><option value="">Who's up</option>${athletes.map((x) => `<option value="${x.id}" ${x.id === w ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>`; }).join("")}</div>`;
   if (athletes.length) {
     const n = settings.jumpEach || 1;
     h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · hold &amp; drag to move</span></div>
@@ -2891,7 +2929,7 @@ function jumpHTML() {
 // the rising bar while in the air: flies the takeoff speed (h = v·t − g·t²/2) up to its peak and holds it there.
 // A live preview; the real number comes from the full recording a moment after landing.
 function airScale() {
-  const mine = jumps.filter((j) => j.athleteId === cap.athleteId && dayKey(j.ts) === dayKey(Date.now()));
+  const who = (pod.air && pod.air.who) || cap.athleteId, mine = jumps.filter((j) => j.athleteId === who && dayKey(j.ts) === dayKey(Date.now()));
   const best = mine.reduce((b, j) => Math.max(b, j.h), 0), peak = pod.air ? (pod.air.v * pod.air.v) / (2 * PodEngine.G) : 0;
   return { best, top: Math.max(0.7, Math.ceil((Math.max(best, peak) * 1.2) * 10) / 10) };
 }
@@ -2926,7 +2964,7 @@ function jumpSim() {
   const next = () => {
     if (i < steps.length) {
       pod.simPh = steps[i][0];
-      if (pod.simPh === 2) pod.air = R.ok ? { v: R.takeoffSpeed, t0: performance.now() } : null;
+      if (pod.simPh === 2) pod.air = R.ok ? { v: R.takeoffSpeed, t0: performance.now(), who: cap.athleteId } : null;
       render(); if (pod.simPh === 2 && pod.air) airTick();
       setTimeout(next, steps[i++][1]); return;
     }
@@ -3528,7 +3566,7 @@ function settingsHTML() {
   h += `<h2>Sound and Hands Free</h2>${chimeCard()}<div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Save every run and get ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>${voiceCard()}
     <div class="card between"><div><b>Body weight in</b></div><div class="seg" style="width:140px"><button data-act="unit" data-v="lb" aria-pressed="${settings.weightUnit === "lb"}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${settings.weightUnit === "kg"}">kg</button></div></div>
     <div class="card between"><div><b>Look</b></div><div class="seg" style="width:200px"><button data-act="theme" data-v="" aria-pressed="${!settings.theme}">Auto</button><button data-act="theme" data-v="dark" aria-pressed="${settings.theme === "dark"}">Dark</button><button data-act="theme" data-v="light" aria-pressed="${settings.theme === "light"}">Light</button></div></div>`;
-  h += `<h2>Waist pod</h2>${podCardHTML()}`;
+  h += `<h2>Waist pods</h2>${podCardHTML()}`;
   h += `<h2>Tripod setup</h2><div class="card between"><div><b>Level &amp; aim</b><div class="small muted">Digital level, where the beam lands down the runway, and the bump alarm.${sensor.connected && sensor.bump ? ` <b style="color:var(--warn)">The tripod moved.</b>` : ""}</div></div><button class="btn" data-act="go-level">Open</button></div>${setupGuide("runway100")}${setupGuide("runway150")}`;
   h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">${WEB_COPY ? "This copy of the app opens with no connection at all." : "This is the sensor's page. Send runs to your home-screen app after each session."} ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
     <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
@@ -3593,13 +3631,14 @@ let backStack = [];
 function render() {
   const app = $("#app");
   const html = view === "home" ? homeHTML() : view === "new" ? newHTML() : view === "run" ? runHTML(viewArg) : view === "sessions" ? sessionsHTML() : view === "session" ? sessionHTML(viewArg)
-    : view === "compare" ? compareHTML() : view === "analytics" ? analyticsHTML() : view === "settings" ? settingsHTML() : view === "athlete" ? athleteFormHTML(viewArg) : view === "level" ? levelHTML() : view === "jump" ? jumpHTML() : view === "podcal" ? podCalHTML() : homeHTML();
+    : view === "compare" ? compareHTML() : view === "analytics" ? analyticsHTML() : view === "settings" ? settingsHTML() : view === "athlete" ? athleteFormHTML(viewArg) : view === "level" ? levelHTML() : view === "jump" ? jumpHTML() : view === "podcal" ? podCalHTML(viewArg) : homeHTML();
   app.innerHTML = html;
   const runOn = view === "new" && ["waiting", "ready", "recording", "processing", "review"].includes(cap.phase);
   document.documentElement.classList.toggle("run-on", runOn);
   // each run screen opens at the top, so the status strip and the name are in view
   const ph = view + ":" + cap.phase; if (runOn && ph !== render.last) window.scrollTo(0, 0); render.last = ph;
   const lu = $("#lineup"); if (lu) rosterDrag(lu, lineupDrop, luDrag, "id");
+  document.querySelectorAll("select[data-pod]").forEach((s) => (s.onchange = () => { const w = settings.podWho || (settings.podWho = {}); if (s.value) w[s.dataset.pod] = s.value; else delete w[s.dataset.pod]; saveSettings(); render(); }));
   lcDrawAll(); liveDraw(); LC = Object.fromEntries(Object.entries(LC).filter(([k]) => document.querySelector(`[data-lc="${k}"]`)));
   const tab = { home: "home", new: "new", run: "sessions", sessions: "sessions", session: "sessions", compare: "analytics", analytics: "analytics", settings: "settings", athlete: "settings", level: "settings", jump: "new", podcal: "settings" }[view];
   document.querySelectorAll(".tabbar [data-go]").forEach((b) => (b.dataset.go === tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
@@ -3644,12 +3683,13 @@ document.addEventListener("click", (e) => {
     case "cert-copy": copySetupLink(); break;
     case "go-level": e.preventDefault(); nav("level"); break;
     case "go-jump": nav("jump"); break;
-    case "go-podcal": pod.calMsg = ""; nav("podcal"); break;
-    case "pod-cal": pod.calMsg = "Measuring… keep it still."; render(); podCmd({ do: "cal", side: v }); break;
-    case "pod-uncal": podCmd({ do: "uncal" }); break;
-    case "pod-send": podCmd({ do: "send" }).then((j) => j && j.online && toast("Asked the pod for its last 14 s.")); break;
+    case "go-podcal": pod.calMsg = ""; nav("podcal", id); break;
+    case "pod-cal": pod.calMsg = "Measuring… keep it still."; render(); podCmd({ do: "cal", side: v, id }); break;
+    case "pod-uncal": podCmd({ do: "uncal", id }); break;
+    case "pod-send": podCmd({ do: "send", id }).then((j) => j && j.online && toast(`Asked the ${podName(id).toLowerCase()} for its last 14 s.`)); break;
+    case "pod-color": { const c = settings.podColors || (settings.podColors = {}); const other = Object.keys(c).find((k) => k !== id && c[k] === v); if (other) c[other] = c[id]; c[id] = v; saveSettings(); render(); break; }
     case "jump-sim": jumpSim(); break;
-    case "jump-next": pod.show = null; pod.lastPh = null; render(); break;
+    case "jump-next": pod.show = null; render(); break;
     case "jump-each": settings.jumpEach = +v; pod.turn = 0; saveSettings(); render(); break;
     case "jump-del": jumps = jumps.filter((j) => j.id !== id); saveJumps(); render(); break;
     case "lv-do": lvDo(v); break;
