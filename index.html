@@ -555,6 +555,9 @@ html.disp-on,html.disp-on body{overflow:hidden}
 .pods{display:flex;flex-direction:column;gap:10px}.prow{display:flex;align-items:center;gap:10px}
 .prow .pname{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
 .prow select{max-width:48%;min-height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;padding:0 8px}
+.jx{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.jx div{background:var(--tint);border:1px solid var(--line);border-radius:12px;padding:8px 10px;min-width:0}
+.jx span{display:block;font-size:12px;color:var(--muted);font-family:var(--ui);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.jx b{font-size:24px;line-height:1.1;white-space:nowrap}.jx small{font-size:.55em;color:var(--muted);margin-left:2px}
+.jtab th,.jtab td{padding:8px 4px}.jtab td .small{white-space:nowrap}
 .jump-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}.jump-two .jump-big{font-size:clamp(34px,11vw,52px)}
 .jump-big{font-family:var(--display);font-weight:800;font-size:64px;line-height:1;margin:4px 0}
 .jump-big small{font-size:22px;color:var(--muted);margin-left:6px}
@@ -1228,8 +1231,26 @@ const PodEngine = (() => {
     // The answer: the average of the takeoff speed (v²/2g) and the rise of the height profile. In tests they err in
     // opposite directions by about a centimetre (where exactly "takeoff" falls), so the average lands on the truth.
     const diff = hFlight - (hVel + hRise) / 2;
+    // The countermovement, like a force plate reads it: when they start down (onset), the bottom of the dip, takeoff.
+    //   down: onset → bottom (unweighting + braking) · up: bottom → takeoff (propulsion) · time to takeoff = both
+    //   RSImod = jump height / time to takeoff (m/s): the "fast and springy" number
+    //   power per kg = (g + a) · v (vertical); peak force in body weights = (g + a) / g
+    const kT = Math.max(1, Math.min(L - 1, kTo));
+    // onset: the first clear move down (0.1 m/s), then back to where the acceleration began
+    let kOn = 0; while (kOn < kT && Vc[kOn] > -0.1) kOn++;
+    while (kOn > 0 && Math.abs(I.A[kOn]) > 0.5) kOn--;
+    // bottom: where the speed turns from down to up for the last time before takeoff
+    let kBot = kT; while (kBot > kOn && Vc[kBot] > 0) kBot--;
+    let pk = 0, pSum = 0, pN = 0, fMax = 0, vMin = 0;
+    for (let k = kOn; k <= kT; k++) {
+      const f = G + I.A[k], pw = f * Vc[k];
+      if (f > fMax) fMax = f; if (Vc[k] < vMin) vMin = Vc[k];
+      if (k >= kBot) { if (pw > pk) pk = pw; pSum += pw; pN++; }
+    }
+    const tDown = (kBot - kOn) / r.hz, tUp = (kT - kBot) / r.hz, tTT = tDown + tUp, hAns = (hVel + hRise) / 2;
+    const cm = { tDown, tUp, tTT, rsiMod: tTT > 0 ? hAns / tTT : null, depth: Zc[kOn] - Zc[kBot], peakPowerKg: pk, meanPowerKg: pN ? pSum / pN : 0, peakForceBW: fMax / G, downSpeed: -vMin };
     return {
-      ok: true, height: (hVel + hRise) / 2, heightStanding: Math.max(...Zc.slice(kTo)), heightSpeed: hVel, heightRise: hRise, heightFlight: hFlight, flightTime: T, takeoffSpeed: vTo, dip: -dip,
+      ok: true, cm, height: (hVel + hRise) / 2, heightStanding: Math.max(...Zc.slice(kTo)), heightSpeed: hVel, heightRise: hRise, heightFlight: hFlight, flightTime: T, takeoffSpeed: vTo, dip: -dip,
       tTakeoff: tTo, tLand, agree: Math.abs(diff) <= 0.03,
       note: Math.abs(diff) <= 0.03 ? "" : diff > 0 ? "Landed lower than you took off (bent knees): the height above doesn't depend on the landing." : "Flight time reads lower than the takeoff speed: check the pod is snug on the strap.",
       window: (i1 - i0) / r.hz, profile: { hz: r.hz, t0: i0 / r.hz, z: Array.from(Zc) },
@@ -1361,13 +1382,15 @@ const PodSim = (() => {
   }
 
   // ---- a countermovement jump: stand, dip, jump, land, stand ----
-  function jump(v0, landDrop) {
-    const z0 = 1.0, zTo = 1.1, tTo = 2.0;
+  // o: { dip: how deep the countermovement goes (m), ecc: s from starting down to the bottom, con: s from the bottom to takeoff }
+  function jump(v0, landDrop, o = {}) {
+    const dip = o.dip || 0.28, ecc = o.ecc || 0.45, con = o.con || 0.35;
+    const z0 = 1.0, zTo = 1.1, t0 = 1.2, tBot = t0 + ecc, tTo = tBot + con;
     const tPeak = tTo + v0 / G, zPeak = zTo + v0 * v0 / (2 * G), zL = zTo - landDrop, tL = tPeak + Math.sqrt(2 * (zPeak - zL) / G), vL = -G * (tL - tPeak);
-    const hip = path([[0, z0, 0, 0], [1.2, z0, 0, 0], [1.65, 0.72, 0, 8], [tTo, zTo, v0, -G], [tL, zL, vL, -G], [tL + 0.05, zL - 0.08, -1.5, 45], [tL + 0.3, 0.8, 0, 6], [tL + 0.9, z0, 0, 0], [tL + 2.2, z0, 0, 0]]);
+    const hip = path([[0, z0, 0, 0], [t0, z0, 0, 0], [tBot, z0 - dip, 0, 8 * (dip / 0.28) * (0.45 / ecc) ** 2], [tTo, zTo, v0, -G], [tL, zL, vL, -G], [tL + 0.05, zL - 0.08, -1.5, 45], [tL + 0.3, 0.8, 0, 6], [tL + 0.9, z0, 0, 0], [tL + 2.2, z0, 0, 0]]);
     const xs = path([[0, 0, 0, 0], [tL + 2.2, 0, 0, 0]]);
-    const phi = path([[0, 0, 0, 0], [1.2, 0, 0, 0], [1.65, 25 * deg, 0, 0], [tTo, -5 * deg, -40 * deg, 0], [tL, 3 * deg, 20 * deg, 0], [tL + 0.3, 20 * deg, 0, 0], [tL + 0.9, 0, 0, 0], [tL + 2.2, 0, 0, 0]]);
-    return { dur: tL + 2.2, hip, xs, phi, truth: { tTo, tL } };
+    const phi = path([[0, 0, 0, 0], [t0, 0, 0, 0], [tBot, 25 * deg, 0, 0], [tTo, -5 * deg, -40 * deg, 0], [tL, 3 * deg, 20 * deg, 0], [tL + 0.3, 20 * deg, 0, 0], [tL + 0.9, 0, 0, 0], [tL + 2.2, 0, 0, 0]]);
+    return { dur: tL + 2.2, hip, xs, phi, truth: { tTo, tL, t0, tBot, dip } };
   }
   // ---- a full vault: run, plant and swing up, release, fall into the pit, lie still ----
   function vault(zRel, vRel, matTop) {
@@ -2888,7 +2911,8 @@ function podJump(rec, sim, podId) {
   if (!R.ok) { toast(R.why); render(); return; }
   jumpInit();
   const worn = podId && podWho(podId), a = worn || cap.athleteId || settings.lastAthlete || (athletes[0] && athletes[0].id);
-  const j = { id: uid(), ts: Date.now(), athleteId: a, h: R.height, hStand: R.heightStanding, hFlight: R.heightFlight, t: R.flightTime, agree: R.agree, cal: rec.calibrated, sim: !!sim, pod: podId || null };
+  const j = { id: uid(), ts: Date.now(), athleteId: a, h: R.height, hStand: R.heightStanding, hFlight: R.heightFlight, t: R.flightTime, agree: R.agree, cal: rec.calibrated, sim: !!sim, pod: podId || null,
+    tto: R.cm ? R.cm.tTT : null, rsi: R.cm ? R.cm.rsiMod : null, pwKg: R.cm ? R.cm.peakPowerKg : null };
   jumps.unshift(j); saveJumps();
   // the result stays up (see jumpHTML); whoever is next is lined up behind it (a pod someone wears keeps them)
   pod.show = j.id; pod.showAt = Date.now(); pod.sawMove = false; pod.air = null;
@@ -2989,6 +3013,7 @@ function jumpHTML() {
     const who = esc(athleteById(shown.athleteId).name);
     h += stage("d-blue", "Result", who, `<div class="st-label">Takeoff to peak${shown.sim ? " · simulated" : ""}${shown.pod && on.length > 1 ? ` · <span style="color:${podCss(shown.pod)}">${podName(shown.pod)}</span>` : ""}</div><div class="st-big" style="color:var(--blue)">${fmtJump(shown.h)}<small>cm</small></div>
       <div class="st-ev">${shown.hStand != null ? `Standing to peak <b style="color:var(--text)">${fmtJump(shown.hStand)} cm</b> · ` : ""}${fmtJumpAlt(shown.h)}</div>
+      ${shown.tto != null ? `<div class="jx"><div><span>Time to takeoff</span><b>${shown.tto.toFixed(2)}<small>s</small></b></div><div><span>RSImod</span><b>${shown.rsi.toFixed(2)}</b></div><div><span>Peak power</span><b>${fmtPow(shown).replace(/ (W\/kg|W)$/, "<small>$1</small>")}</b></div></div>` : ""}
       <div class="small muted" style="margin-top:8px">A jump mat would read ${fmtJump(shown.hFlight)} cm (flight ${shown.t.toFixed(3)} s)${shown.agree ? "" : ": higher because of the lower landing, which doesn't change the numbers above"}${shown.cal ? "" : " · pod not calibrated"}</div>`);
     const nx = athletes.find((x) => x.id === cap.athleteId);
     h += `<div class="card between"><div><div class="small muted">Next up</div><b style="font-size:20px">${esc(nx ? nx.name : "")}</b><div class="small muted">${podOn ? "Switches when someone stands still with a pod on" : ""}</div></div><button class="btn primary" style="white-space:nowrap" data-act="jump-next">Next ›</button></div>`;
@@ -3018,6 +3043,10 @@ function jumpHTML() {
   }
   return h;
 }
+// explosiveness, from the countermovement: time to takeoff (start of the dip to leaving the ground), RSImod
+// (jump height ÷ time to takeoff, m/s: higher = more height for less time) and peak power (W/kg; watts with body weight)
+const jkg = (aid) => { const a = athletes.find((x) => x.id === aid); return a && a.kg ? a.kg : null; };
+const fmtPow = (j) => { if (j.pwKg == null) return "–"; const kg = jkg(j.athleteId); return kg ? `${Math.round(j.pwKg * kg).toLocaleString()} W` : `${j.pwKg.toFixed(1)} W/kg`; };
 // the rising bar while in the air: flies the takeoff speed (h = v·t − g·t²/2) up to its peak and holds it there.
 // A live preview; the real number comes from the full recording a moment after landing.
 function airScale() {
@@ -3639,16 +3668,36 @@ function jumpAnalyticsHTML(mine) {
     ${bh && bh.hFlight != null ? `<div class="item"><div>Jump mat would read<div class="small muted">same best jump, timed in the air like a jump mat</div></div><div class="r"><b>${cm(bh.hFlight)} cm</b> <span class="small muted">${bh.hFlight >= bh.h ? "+" : "−"}${cm(Math.abs(bh.hFlight - bh.h))}</span></div></div>` : ""}
     <div class="item"><div>Jumps</div><div class="r">${mine.length} over ${days.length} day${days.length === 1 ? "" : "s"}</div></div></div>
     <div class="small muted" style="margin-top:8px">A jump mat works the height out from time in the air, so it reads higher when you land with bent knees. The pod measures the rise itself.</div></div>`;
+  // explosiveness: how fast they get off the ground, and what that buys
+  const xs = mine.filter((j) => j.tto != null);
+  if (xs.length) {
+    const fast = xs.reduce((b, j) => (j.tto < b.tto ? j : b)), rsiB = xs.reduce((b, j) => (j.rsi > b.rsi ? j : b)), pwB = xs.reduce((b, j) => (j.pwKg > b.pwKg ? j : b));
+    const avgT = xs.reduce((s, j) => s + j.tto, 0) / xs.length;
+    const rd = {}; for (const j of xs) { const k = dayKey(j.ts); if (!rd[k] || j.rsi > rd[k]) rd[k] = j.rsi; }
+    const rk = Object.keys(rd).sort();
+    let ch = "";
+    if (rk.length > 1) {
+      const t0 = new Date(rk[0]).getTime(), RX = rk.map((d) => (new Date(d).getTime() - t0) / 864e5), RY = rk.map((d) => rd[d]), lo = Math.min(...RY), hi = Math.max(...RY), pd = Math.max(0.03, (hi - lo) * 0.25);
+      ch = lcSlot({ aria: "Best RSImod per day", h: 150, x0: -0.5, x1: Math.max(1, RX[RX.length - 1]) + 0.5, y0: lo - pd, y1: hi + pd, yUnit: "RSImod", yfmt: (t) => t.toFixed(2),
+        xt: [RX[0], RX[RX.length - 1]], xfmt: (t) => dayLabel(rk[RX.indexOf(t)] || rk[0]), series: [{ x: RX, y: RY, color: "var(--pink)", w: 2.4, fill: true }], dots: RX.map((x, i) => ({ x, y: RY[i] })) });
+    }
+    h += `<div class="card"><div class="label">Explosiveness</div>
+      <div class="jx"><div><span>Takeoff time</span><b>${fast.tto.toFixed(2)}<small>s</small></b></div><div><span>Best RSImod</span><b>${rsiB.rsi.toFixed(2)}</b></div><div><span>Peak power</span><b>${fmtPow(pwB).replace(/ (W\/kg|W)$/, "<small>$1</small>")}</b></div></div>
+      <div class="small muted" style="margin:8px 0 ${ch ? 4 : 0}px">Time to takeoff: from starting the dip to leaving the ground (average ${avgT.toFixed(2)} s): shorter is snappier. RSImod: jump height ÷ that time, so it rewards height from a quick dip, not a big slow one.${jkg(anState.athleteId) ? "" : " Add body weight for watts."}</div>
+      ${ch ? `<div class="label" style="margin-top:6px">Best RSImod per day</div>${ch}` : ""}</div>`;
+  }
   // everyone's best, as bars
   const tops = athletes.map((a) => ({ a, j: jumps.filter((j) => j.athleteId === a.id).reduce((b, j) => (!b || j.h > b.h ? j : b), null) })).filter((x) => x.j).sort((x, y) => y.j.h - x.j.h);
   if (tops.length > 1) {
     const mx = tops[0].j.h;
     h += `<div class="card"><div class="label" style="margin-bottom:8px">Everyone's best · takeoff to peak</div>${tops.map(({ a, j }) => `<div class="jrank${a.id === anState.athleteId ? " me" : ""}" data-act="an-ath" data-id="${a.id}"><span class="nm">${esc(a.name)}</span><span class="bar"><b style="width:${((100 * j.h) / mx).toFixed(1)}%"></b></span><span class="v">${cm(j.h)}</span></div>`).join("")}</div>`;
   }
-  h += `<h2>Jumps</h2><div class="card tw"><table><thead><tr><th>When</th><th>Takeoff</th><th>Standing</th><th>Jump mat</th><th></th></tr></thead><tbody>${mine.slice(0, 60).map((j) => `<tr>
-    <td style="white-space:nowrap"><b>${dayLabel(dayKey(j.ts))}</b><div class="small muted">${timeLabel(j.ts)}${j.sim ? " sim" : ""}</div></td><td><b>${cm(j.h)}</b></td><td>${j.hStand != null ? cm(j.hStand) : "–"}</td><td class="muted">${j.hFlight != null ? cm(j.hFlight) : "–"}</td>
+  h += `<h2>Jumps</h2><div class="card tw"><table class="jtab"><thead><tr><th>When</th><th>Height</th><th>Mat</th><th>Time</th><th>RSI</th><th></th></tr></thead><tbody>${mine.slice(0, 60).map((j) => `<tr>
+    <td style="white-space:nowrap"><b>${dayLabel(dayKey(j.ts))}</b><div class="small muted">${timeLabel(j.ts)}${j.sim ? " sim" : ""}</div></td>
+    <td><b>${cm(j.h)}</b>${j.hStand != null ? `<div class="small muted">stand ${cm(j.hStand)}</div>` : ""}</td><td class="muted">${j.hFlight != null ? cm(j.hFlight) : "–"}</td>
+    <td>${j.tto != null ? j.tto.toFixed(2) : "–"}</td><td>${j.rsi != null ? j.rsi.toFixed(2) : "–"}</td>
     <td style="width:1%"><button class="btn sm ghost" data-act="jump-del" data-id="${j.id}" aria-label="Delete">✕</button></td></tr>`).join("")}</tbody></table>
-    <div class="small muted" style="margin-top:8px">All in cm. Takeoff: takeoff to peak. Standing: standing to peak (like Vertec). Jump mat: what a jump mat would show.</div></div>`;
+    <div class="small muted" style="margin-top:8px">Height: takeoff to peak, cm (stand: standing to peak). Mat: what a jump mat would show. Time: time to takeoff, s. RSI: RSImod.</div></div>`;
   return h;
 }
 
@@ -4013,7 +4062,9 @@ function addDemoData() {
     const a = athletes.find((x) => x.name === name); if (!a) continue;
     for (let day = 13; day >= 0; day -= 3) for (let rep = 0; rep < 3; rep++) {
       const hT = 0.46 + dv * 0.12 + (13 - day) * 0.002 + (Math.random() - 0.5) * 0.04;
-      jumps.push({ id: uid(), ts: now - day * 864e5 - 3600e3 + rep * 90e3, athleteId: a.id, h: hT, hStand: hT + 0.085 + Math.random() * 0.02, hFlight: hT + 0.01, t: Math.sqrt((8 * hT) / 9.80665), agree: true, cal: true, sim: true });
+      const tto = 0.62 + (name.endsWith("2") ? 0.12 : 0) - (13 - day) * 0.004 + Math.random() * 0.06, kgA = a.kg || 70;
+      jumps.push({ id: uid(), ts: now - day * 864e5 - 3600e3 + rep * 90e3, athleteId: a.id, h: hT, hStand: hT + 0.085 + Math.random() * 0.02, hFlight: hT + 0.01, t: Math.sqrt((8 * hT) / 9.80665), agree: true, cal: true, sim: true,
+        tto, rsi: hT / tto, pwKg: (60.7 * hT * 100 + 45.3 * kgA - 2055) / kgA });
     }
   }
   jumps.sort((x, y) => y.ts - x.ts); saveJumps();
@@ -4659,15 +4710,28 @@ function jumpReport(aid) {
     ${squad}
     <div class="box"><h4>Key takeaways</h4><ul class="sum">${notes.slice(0, 6).map((n) => `<li>${n}</li>`).join("")}</ul></div>
     ${footer(1, pages, "LiDAR Sensor app · waist pod · BMI160 · 1600 readings per second")}</div>`;
-  const recent = js.slice(-26).reverse(), bestId = best ? best.id : null;
-  const tbl = `<table class="ctab"><thead><tr><th>Date</th><th>Time</th><th>Takeoff to peak</th><th>Standing to peak</th><th>Jump mat</th><th>Flight</th><th></th></tr></thead><tbody>${recent.map((j) => `<tr>
-    <td>${sdate(j.ts)}</td><td>${tfmt(j.ts)}</td><td class="${j.id === bestId ? "lead" : ""}">${cmF(j.h)} cm</td><td>${j.hStand != null ? cmF(j.hStand) + " cm" : "–"}</td><td>${j.hFlight != null ? cmF(j.hFlight) + " cm" : "–"}</td><td>${j.t ? j.t.toFixed(3) + " s" : "–"}</td>
+  const recent = js.slice(-20).reverse(), bestId = best ? best.id : null;
+  const tbl = `<table class="ctab"><thead><tr><th>Date</th><th>Time</th><th>Takeoff to peak</th><th>Standing to peak</th><th>Jump mat</th><th>Takeoff time</th><th>RSImod</th><th></th></tr></thead><tbody>${recent.map((j) => `<tr>
+    <td>${sdate(j.ts)}</td><td>${tfmt(j.ts)}</td><td class="${j.id === bestId ? "lead" : ""}">${cmF(j.h)} cm</td><td>${j.hStand != null ? cmF(j.hStand) + " cm" : "–"}</td><td>${j.hFlight != null ? cmF(j.hFlight) + " cm" : "–"}</td><td>${j.tto != null ? j.tto.toFixed(2) + " s" : "–"}</td><td>${j.rsi != null ? j.rsi.toFixed(2) : "–"}</td>
     <td style="color:${INK2}">${j.sim ? "sim" : j.cal ? "" : "not cal."}</td></tr>`).join("")}</tbody></table>`;
   const ses = days.slice(-12).reverse().map((d) => { const l = js.filter((j) => dayKey(j.ts) === d), hs = l.map((j) => j.h); return `<tr><td>${dfmt(new Date(d).getTime() + 12 * 36e5)}</td><td>${l.length}</td><td class="lead">${cmF(Math.max(...hs))} cm</td><td>${cmF(avgOf(hs))} cm</td><td>${byDay[d].s ? cmF(byDay[d].s) + " cm" : "–"}</td></tr>`; }).join("");
+  const xs = js.filter((j) => j.tto != null), kg = a.kg;
+  let xbox = "";
+  if (xs.length) {
+    const fast = xs.reduce((b, j) => (j.tto < b.tto ? j : b)), rb = xs.reduce((b, j) => (j.rsi > b.rsi ? j : b)), pb = xs.reduce((b, j) => (j.pwKg > b.pwKg ? j : b));
+    const aT = avgOf(xs.map((j) => j.tto)), aR = avgOf(xs.map((j) => j.rsi));
+    xbox = `<div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Explosiveness</h4><span style="color:${INK2};font-size:11px">from the countermovement</span></div>
+      <div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-top:6px">
+        ${m("Fastest takeoff time", fast.tto.toFixed(2), "s", `average ${aT.toFixed(2)} s · start of the dip to leaving the ground`)}
+        ${m("Best RSImod", rb.rsi.toFixed(2), "", `average ${aR.toFixed(2)} · height ÷ takeoff time`)}
+        ${m("Peak power", kg ? Math.round(pb.pwKg * kg).toLocaleString() : pb.pwKg.toFixed(1), kg ? "W" : "W/kg", kg ? `${pb.pwKg.toFixed(1)} W/kg` : "add body weight for watts", "hl")}
+      </div></div>`;
+  }
   const p2 = `<div class="page">${head}
+    ${xbox}
     <div class="box"><h4>Sessions</h4><table class="ctab"><thead><tr><th>Session</th><th>Jumps</th><th>Best</th><th>Average</th><th>Best standing to peak</th></tr></thead><tbody>${ses}</tbody></table></div>
     <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Jumps${js.length > recent.length ? ` · latest ${recent.length} of ${js.length}` : ""}</h4><span style="color:${INK2};font-size:11px">best in pink</span></div>${tbl}</div>
-    <div style="color:${INK2};font-size:11px;line-height:1.5;margin-top:4px">Takeoff to peak: how far the hips rise after the feet leave the ground (what a jump mat aims to measure). Standing to peak: from standing tall to the highest point (like a jump-and-reach test). Measured by the waist pod from the motion itself, from standing still to the top of the jump, so the landing doesn't change it.</div>
+    <div style="color:${INK2};font-size:11px;line-height:1.5;margin-top:4px">Takeoff time: from starting the dip to leaving the ground (shorter is snappier). RSImod: jump height ÷ takeoff time, in m/s. Peak power: vertical, from the hips' speed and acceleration. Takeoff to peak: how far the hips rise after the feet leave the ground (what a jump mat aims to measure). Standing to peak: from standing tall to the highest point (like a jump-and-reach test). Measured by the waist pod from the motion itself, from standing still to the top of the jump, so the landing doesn't change it.</div>
     ${footer(2, pages, "LiDAR Sensor app · waist pod · BMI160 · 1600 readings per second")}</div>`;
   return p1 + p2;
 }

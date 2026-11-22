@@ -636,15 +636,28 @@ function jumpReport(aid) {
     ${squad}
     <div class="box"><h4>Key takeaways</h4><ul class="sum">${notes.slice(0, 6).map((n) => `<li>${n}</li>`).join("")}</ul></div>
     ${footer(1, pages, "LiDAR Sensor app · waist pod · BMI160 · 1600 readings per second")}</div>`;
-  const recent = js.slice(-26).reverse(), bestId = best ? best.id : null;
-  const tbl = `<table class="ctab"><thead><tr><th>Date</th><th>Time</th><th>Takeoff to peak</th><th>Standing to peak</th><th>Jump mat</th><th>Flight</th><th></th></tr></thead><tbody>${recent.map((j) => `<tr>
-    <td>${sdate(j.ts)}</td><td>${tfmt(j.ts)}</td><td class="${j.id === bestId ? "lead" : ""}">${cmF(j.h)} cm</td><td>${j.hStand != null ? cmF(j.hStand) + " cm" : "–"}</td><td>${j.hFlight != null ? cmF(j.hFlight) + " cm" : "–"}</td><td>${j.t ? j.t.toFixed(3) + " s" : "–"}</td>
+  const recent = js.slice(-20).reverse(), bestId = best ? best.id : null;
+  const tbl = `<table class="ctab"><thead><tr><th>Date</th><th>Time</th><th>Takeoff to peak</th><th>Standing to peak</th><th>Jump mat</th><th>Takeoff time</th><th>RSImod</th><th></th></tr></thead><tbody>${recent.map((j) => `<tr>
+    <td>${sdate(j.ts)}</td><td>${tfmt(j.ts)}</td><td class="${j.id === bestId ? "lead" : ""}">${cmF(j.h)} cm</td><td>${j.hStand != null ? cmF(j.hStand) + " cm" : "–"}</td><td>${j.hFlight != null ? cmF(j.hFlight) + " cm" : "–"}</td><td>${j.tto != null ? j.tto.toFixed(2) + " s" : "–"}</td><td>${j.rsi != null ? j.rsi.toFixed(2) : "–"}</td>
     <td style="color:${INK2}">${j.sim ? "sim" : j.cal ? "" : "not cal."}</td></tr>`).join("")}</tbody></table>`;
   const ses = days.slice(-12).reverse().map((d) => { const l = js.filter((j) => dayKey(j.ts) === d), hs = l.map((j) => j.h); return `<tr><td>${dfmt(new Date(d).getTime() + 12 * 36e5)}</td><td>${l.length}</td><td class="lead">${cmF(Math.max(...hs))} cm</td><td>${cmF(avgOf(hs))} cm</td><td>${byDay[d].s ? cmF(byDay[d].s) + " cm" : "–"}</td></tr>`; }).join("");
+  const xs = js.filter((j) => j.tto != null), kg = a.kg;
+  let xbox = "";
+  if (xs.length) {
+    const fast = xs.reduce((b, j) => (j.tto < b.tto ? j : b)), rb = xs.reduce((b, j) => (j.rsi > b.rsi ? j : b)), pb = xs.reduce((b, j) => (j.pwKg > b.pwKg ? j : b));
+    const aT = avgOf(xs.map((j) => j.tto)), aR = avgOf(xs.map((j) => j.rsi));
+    xbox = `<div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Explosiveness</h4><span style="color:${INK2};font-size:11px">from the countermovement</span></div>
+      <div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-top:6px">
+        ${m("Fastest takeoff time", fast.tto.toFixed(2), "s", `average ${aT.toFixed(2)} s · start of the dip to leaving the ground`)}
+        ${m("Best RSImod", rb.rsi.toFixed(2), "", `average ${aR.toFixed(2)} · height ÷ takeoff time`)}
+        ${m("Peak power", kg ? Math.round(pb.pwKg * kg).toLocaleString() : pb.pwKg.toFixed(1), kg ? "W" : "W/kg", kg ? `${pb.pwKg.toFixed(1)} W/kg` : "add body weight for watts", "hl")}
+      </div></div>`;
+  }
   const p2 = `<div class="page">${head}
+    ${xbox}
     <div class="box"><h4>Sessions</h4><table class="ctab"><thead><tr><th>Session</th><th>Jumps</th><th>Best</th><th>Average</th><th>Best standing to peak</th></tr></thead><tbody>${ses}</tbody></table></div>
     <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Jumps${js.length > recent.length ? ` · latest ${recent.length} of ${js.length}` : ""}</h4><span style="color:${INK2};font-size:11px">best in pink</span></div>${tbl}</div>
-    <div style="color:${INK2};font-size:11px;line-height:1.5;margin-top:4px">Takeoff to peak: how far the hips rise after the feet leave the ground (what a jump mat aims to measure). Standing to peak: from standing tall to the highest point (like a jump-and-reach test). Measured by the waist pod from the motion itself, from standing still to the top of the jump, so the landing doesn't change it.</div>
+    <div style="color:${INK2};font-size:11px;line-height:1.5;margin-top:4px">Takeoff time: from starting the dip to leaving the ground (shorter is snappier). RSImod: jump height ÷ takeoff time, in m/s. Peak power: vertical, from the hips' speed and acceleration. Takeoff to peak: how far the hips rise after the feet leave the ground (what a jump mat aims to measure). Standing to peak: from standing tall to the highest point (like a jump-and-reach test). Measured by the waist pod from the motion itself, from standing still to the top of the jump, so the landing doesn't change it.</div>
     ${footer(2, pages, "LiDAR Sensor app · waist pod · BMI160 · 1600 readings per second")}</div>`;
   return p1 + p2;
 }

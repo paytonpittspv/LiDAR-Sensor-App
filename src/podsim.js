@@ -86,13 +86,15 @@ const PodSim = (() => {
   }
 
   // ---- a countermovement jump: stand, dip, jump, land, stand ----
-  function jump(v0, landDrop) {
-    const z0 = 1.0, zTo = 1.1, tTo = 2.0;
+  // o: { dip: how deep the countermovement goes (m), ecc: s from starting down to the bottom, con: s from the bottom to takeoff }
+  function jump(v0, landDrop, o = {}) {
+    const dip = o.dip || 0.28, ecc = o.ecc || 0.45, con = o.con || 0.35;
+    const z0 = 1.0, zTo = 1.1, t0 = 1.2, tBot = t0 + ecc, tTo = tBot + con;
     const tPeak = tTo + v0 / G, zPeak = zTo + v0 * v0 / (2 * G), zL = zTo - landDrop, tL = tPeak + Math.sqrt(2 * (zPeak - zL) / G), vL = -G * (tL - tPeak);
-    const hip = path([[0, z0, 0, 0], [1.2, z0, 0, 0], [1.65, 0.72, 0, 8], [tTo, zTo, v0, -G], [tL, zL, vL, -G], [tL + 0.05, zL - 0.08, -1.5, 45], [tL + 0.3, 0.8, 0, 6], [tL + 0.9, z0, 0, 0], [tL + 2.2, z0, 0, 0]]);
+    const hip = path([[0, z0, 0, 0], [t0, z0, 0, 0], [tBot, z0 - dip, 0, 8 * (dip / 0.28) * (0.45 / ecc) ** 2], [tTo, zTo, v0, -G], [tL, zL, vL, -G], [tL + 0.05, zL - 0.08, -1.5, 45], [tL + 0.3, 0.8, 0, 6], [tL + 0.9, z0, 0, 0], [tL + 2.2, z0, 0, 0]]);
     const xs = path([[0, 0, 0, 0], [tL + 2.2, 0, 0, 0]]);
-    const phi = path([[0, 0, 0, 0], [1.2, 0, 0, 0], [1.65, 25 * deg, 0, 0], [tTo, -5 * deg, -40 * deg, 0], [tL, 3 * deg, 20 * deg, 0], [tL + 0.3, 20 * deg, 0, 0], [tL + 0.9, 0, 0, 0], [tL + 2.2, 0, 0, 0]]);
-    return { dur: tL + 2.2, hip, xs, phi, truth: { tTo, tL } };
+    const phi = path([[0, 0, 0, 0], [t0, 0, 0, 0], [tBot, 25 * deg, 0, 0], [tTo, -5 * deg, -40 * deg, 0], [tL, 3 * deg, 20 * deg, 0], [tL + 0.3, 20 * deg, 0, 0], [tL + 0.9, 0, 0, 0], [tL + 2.2, 0, 0, 0]]);
+    return { dur: tL + 2.2, hip, xs, phi, truth: { tTo, tL, t0, tBot, dip } };
   }
   // ---- a full vault: run, plant and swing up, release, fall into the pit, lie still ----
   function vault(zRel, vRel, matTop) {

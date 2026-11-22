@@ -128,8 +128,26 @@ const PodEngine = (() => {
     // The answer: the average of the takeoff speed (v²/2g) and the rise of the height profile. In tests they err in
     // opposite directions by about a centimetre (where exactly "takeoff" falls), so the average lands on the truth.
     const diff = hFlight - (hVel + hRise) / 2;
+    // The countermovement, like a force plate reads it: when they start down (onset), the bottom of the dip, takeoff.
+    //   down: onset → bottom (unweighting + braking) · up: bottom → takeoff (propulsion) · time to takeoff = both
+    //   RSImod = jump height / time to takeoff (m/s): the "fast and springy" number
+    //   power per kg = (g + a) · v (vertical); peak force in body weights = (g + a) / g
+    const kT = Math.max(1, Math.min(L - 1, kTo));
+    // onset: the first clear move down (0.1 m/s), then back to where the acceleration began
+    let kOn = 0; while (kOn < kT && Vc[kOn] > -0.1) kOn++;
+    while (kOn > 0 && Math.abs(I.A[kOn]) > 0.5) kOn--;
+    // bottom: where the speed turns from down to up for the last time before takeoff
+    let kBot = kT; while (kBot > kOn && Vc[kBot] > 0) kBot--;
+    let pk = 0, pSum = 0, pN = 0, fMax = 0, vMin = 0;
+    for (let k = kOn; k <= kT; k++) {
+      const f = G + I.A[k], pw = f * Vc[k];
+      if (f > fMax) fMax = f; if (Vc[k] < vMin) vMin = Vc[k];
+      if (k >= kBot) { if (pw > pk) pk = pw; pSum += pw; pN++; }
+    }
+    const tDown = (kBot - kOn) / r.hz, tUp = (kT - kBot) / r.hz, tTT = tDown + tUp, hAns = (hVel + hRise) / 2;
+    const cm = { tDown, tUp, tTT, rsiMod: tTT > 0 ? hAns / tTT : null, depth: Zc[kOn] - Zc[kBot], peakPowerKg: pk, meanPowerKg: pN ? pSum / pN : 0, peakForceBW: fMax / G, downSpeed: -vMin };
     return {
-      ok: true, height: (hVel + hRise) / 2, heightStanding: Math.max(...Zc.slice(kTo)), heightSpeed: hVel, heightRise: hRise, heightFlight: hFlight, flightTime: T, takeoffSpeed: vTo, dip: -dip,
+      ok: true, cm, height: (hVel + hRise) / 2, heightStanding: Math.max(...Zc.slice(kTo)), heightSpeed: hVel, heightRise: hRise, heightFlight: hFlight, flightTime: T, takeoffSpeed: vTo, dip: -dip,
       tTakeoff: tTo, tLand, agree: Math.abs(diff) <= 0.03,
       note: Math.abs(diff) <= 0.03 ? "" : diff > 0 ? "Landed lower than you took off (bent knees): the height above doesn't depend on the landing." : "Flight time reads lower than the takeoff speed: check the pod is snug on the strap.",
       window: (i1 - i0) / r.hz, profile: { hz: r.hz, t0: i0 / r.hz, z: Array.from(Zc) },
