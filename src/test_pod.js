@@ -30,6 +30,16 @@ for (const cal of [true, false]) {
     eV.push(res.height - truth); eS.push(res.heightSpeed - truth); eR.push(res.heightRise - truth); eF.push(res.heightFlight - truth);
   }
   report("Vertical jump (the answer)", eV);
+  // deep landings: the answer must not depend on how low you land
+  for (const drop of [0.1, 0.2, 0.35]) {
+    const eD = [];
+    for (let k = 0; k < RUNS / 2; k++) {
+      const hT = 0.3 + 0.4 * rnd(), J = jump(Math.sqrt(2 * G * hT), drop), r = record({ ...J, err: chipErrors(cal) });
+      const iTo = Math.round(J.truth.tTo * r.hz), iL = Math.round(J.truth.tL * r.hz), truth = Math.max(...r.podZ.slice(iTo, iL)) - r.podZ[iTo];
+      const res = PodEngine.analyzeJump(r); if (res.ok) eD.push(res.height - truth);
+    }
+    report(`  landing ${drop * 100} cm lower than takeoff`, eD);
+  }
   report("  from takeoff speed alone", eS);
   report("  from the rise of the height profile alone", eR);
   report("  from flight time (the check)", eF);

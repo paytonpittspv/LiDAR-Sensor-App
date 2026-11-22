@@ -109,25 +109,27 @@ const PodEngine = (() => {
     if (!post) return { ok: false, why: "Stand still for about a second after landing." };
     const thr = 0.3 * G, tTo = crossT(r, f0 - 1, thr), tLand = crossT(r, f1 - 1, thr), T = tLand - tTo;
     const hFlight = (G * T * T) / 8;
-    // integrate from the end of standing still (the last 0.3 s of it sets the orientation) to the start of the next
-    const i0 = Math.max(pre[0], pre[1] - Math.round(0.3 * r.hz)), i1 = post[0] + Math.round(0.1 * r.hz);
-    const st = restState(r, i0, pre[1]), I = integrate(r, i0, i1, +1, st.q, st.bias, 0, 0, st.g);
-    const L = I.V.length, vEnd = I.V[L - 1];
-    // a constant error in acceleration makes the speed error grow in a straight line: take that line out
-    const Vc = Array.from(I.V, (v, k) => v - (vEnd * k) / (L - 1));
+    // Integrate from the end of standing still (the last 0.3 s of it sets the orientation) through the takeoff to the
+    // end of the flight, and stop before the feet touch down: the landing (a stuck landing or a deep squat, hard
+    // impacts) never enters the answer. About a second of integration, short enough that the leftover sensor error
+    // barely builds up (the standing still before sets the gravity and the gyro offsets).
+    const kL0 = Math.round(tLand * r.hz) - 1;
+    const i0 = Math.max(pre[0], pre[1] - Math.round(0.3 * r.hz)), i1 = Math.max(kL0, i0 + 2);
+    const st = restState(r, i0, pre[1], longest(still)), I = integrate(r, i0, i1, +1, st.q, st.bias, 0, 0, st.g);
+    const L = I.V.length, Vc = I.V;
     const kTo = Math.round(tTo * r.hz) - i0, vTo = Vc[Math.max(0, Math.min(L - 1, kTo))];
     const hVel = vTo > 0 ? (vTo * vTo) / (2 * G) : 0;
     // height profile (from the corrected speed), for the chart: 0 = standing
     const Zc = new Float64Array(L); for (let k = 1; k < L; k++) Zc[k] = Zc[k - 1] + ((Vc[k] + Vc[k - 1]) / 2) / r.hz;
     const dip = Math.min(...Zc.slice(0, Math.max(1, kTo)));
-    const kL = Math.round(tLand * r.hz) - i0, hRise = Math.max(...Zc.slice(kTo, Math.max(kTo + 1, kL))) - Zc[Math.max(0, kTo)];
+    const kL = L, hRise = Math.max(...Zc.slice(kTo, Math.max(kTo + 1, kL))) - Zc[Math.max(0, kTo)];
     // The answer: the average of the takeoff speed (v²/2g) and the rise of the height profile. In tests they err in
     // opposite directions by about a centimetre (where exactly "takeoff" falls), so the average lands on the truth.
     const diff = hFlight - (hVel + hRise) / 2;
     return {
       ok: true, height: (hVel + hRise) / 2, heightSpeed: hVel, heightRise: hRise, heightFlight: hFlight, flightTime: T, takeoffSpeed: vTo, dip: -dip,
       tTakeoff: tTo, tLand, agree: Math.abs(diff) <= 0.03,
-      note: Math.abs(diff) <= 0.03 ? "" : diff > 0 ? "Flight time reads higher: probably landed with bent knees." : "Flight time reads lower than the takeoff speed: check the pod is snug on the strap.",
+      note: Math.abs(diff) <= 0.03 ? "" : diff > 0 ? "Landed lower than you took off (bent knees): the height above doesn't depend on the landing." : "Flight time reads lower than the takeoff speed: check the pod is snug on the strap.",
       window: (i1 - i0) / r.hz, profile: { hz: r.hz, t0: i0 / r.hz, z: Array.from(Zc) },
     };
   }
