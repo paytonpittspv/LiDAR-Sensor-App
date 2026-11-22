@@ -2660,10 +2660,11 @@ function jumpHTML() {
 
 // ---------------- views ----------------
 let view = "home", viewArg = null;
-function go(v, arg) {
+function go(v, arg, resume) {
   view = v; viewArg = arg == null ? null : arg;
-  // New run always opens the start page (sprint or vault, who's running, where to stop) unless a run is being recorded right now
-  if (v === "new" && cap.phase !== "recording" && cap.phase !== "processing" && cap.phase !== "summary") { if (cap.phase === "ready") stopNow(); cap.phase = "setup"; cap.step = "event"; cap.error = null; }
+  // New run opens on its first page (sprint or vault, who's running, where to stop) unless a run is being recorded
+  // right now, or you're coming back to it (from adding an athlete, say): then it stays where you were
+  if (v === "new" && !resume && cap.phase !== "recording" && cap.phase !== "processing" && cap.phase !== "summary") { if (cap.phase === "ready") stopNow(); cap.phase = "setup"; cap.step = "event"; cap.error = null; }
   render(); window.scrollTo(0, 0);
   if (v === "settings" && sensor.connected) certSync();   // fresh up-time and restart info for the firmware card
   if (v === "level") { lv.sig = ""; lvLoop(); }
@@ -3231,7 +3232,7 @@ function render() {
   bumpBar();
 }
 function nav(v, arg) { backStack.push([view, viewArg]); go(v, arg); }
-function back() { const p = backStack.pop(); if (p) go(p[0], p[1]); else go("home"); }
+function back() { const p = backStack.pop(); if (p) go(p[0], p[1], true); else go("home"); }
 
 document.addEventListener("click", (e) => {
   const g = e.target.closest("[data-go]"); if (g) { backStack = []; if (g.dataset.go === "new") unlockAudio(); go(g.dataset.go); return; }
@@ -3303,7 +3304,15 @@ document.addEventListener("click", (e) => {
     case "ath-save": {
       const name = $("#athName").value.trim(); if (!name) { toast("Add a name first."); return; }
       const wv = parseFloat($("#athW").value), kg = isFinite(wv) && wv > 0 ? (settings.weightUnit === "lb" ? wv * 0.453592 : wv) : null;
-      if (id) Object.assign(athletes.find((a) => a.id === id), { name, kg }); else { const a = { id: uid(), name, kg }; athletes.push(a); cap.athleteId = a.id; settings.lastAthlete = a.id; saveSettings(); }
+      if (id) Object.assign(athletes.find((a) => a.id === id), { name, kg });
+      else {
+        const a = { id: uid(), name, kg }; athletes.push(a);
+        // added while setting up a run: put them in the lineup
+        const from = backStack[backStack.length - 1];
+        if (from && from[0] === "new" && cap.phase === "setup") { if (!cap.queue.includes(a.id)) cap.queue.push(a.id); cap.athleteId = cap.queue[0]; settings.lastQueue = cap.queue.slice(); }
+        else cap.athleteId = a.id;
+        settings.lastAthlete = cap.athleteId; saveSettings();
+      }
       saveAthletes(); toast("Saved"); back(); break;
     }
     case "ath-del": if (el.dataset.confirm === "1") { athletes = athletes.filter((a) => a.id !== id); saveAthletes(); toast("Athlete removed (their runs are kept)"); back(); } else { el.dataset.confirm = "1"; el.textContent = "Tap again to delete"; } break;
