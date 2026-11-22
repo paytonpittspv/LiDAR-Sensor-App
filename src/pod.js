@@ -123,11 +123,13 @@ const PodEngine = (() => {
     const Zc = new Float64Array(L); for (let k = 1; k < L; k++) Zc[k] = Zc[k - 1] + ((Vc[k] + Vc[k - 1]) / 2) / r.hz;
     const dip = Math.min(...Zc.slice(0, Math.max(1, kTo)));
     const kL = L, hRise = Math.max(...Zc.slice(kTo, Math.max(kTo + 1, kL))) - Zc[Math.max(0, kTo)];
+    // heightStanding: standing tall (before the dip) to the highest point, like a jump-and-reach test: the takeoff
+    // extension onto the toes plus the rise.
     // The answer: the average of the takeoff speed (v²/2g) and the rise of the height profile. In tests they err in
     // opposite directions by about a centimetre (where exactly "takeoff" falls), so the average lands on the truth.
     const diff = hFlight - (hVel + hRise) / 2;
     return {
-      ok: true, height: (hVel + hRise) / 2, heightSpeed: hVel, heightRise: hRise, heightFlight: hFlight, flightTime: T, takeoffSpeed: vTo, dip: -dip,
+      ok: true, height: (hVel + hRise) / 2, heightStanding: Math.max(...Zc.slice(kTo)), heightSpeed: hVel, heightRise: hRise, heightFlight: hFlight, flightTime: T, takeoffSpeed: vTo, dip: -dip,
       tTakeoff: tTo, tLand, agree: Math.abs(diff) <= 0.03,
       note: Math.abs(diff) <= 0.03 ? "" : diff > 0 ? "Landed lower than you took off (bent knees): the height above doesn't depend on the landing." : "Flight time reads lower than the takeoff speed: check the pod is snug on the strap.",
       window: (i1 - i0) / r.hz, profile: { hz: r.hz, t0: i0 / r.hz, z: Array.from(Zc) },

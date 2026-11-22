@@ -1373,7 +1373,7 @@ function podJump(rec, sim) {
   if (!R.ok) { toast(R.why); render(); return; }
   jumpInit();
   const a = cap.athleteId || settings.lastAthlete || (athletes[0] && athletes[0].id);
-  const j = { id: uid(), ts: Date.now(), athleteId: a, h: R.height, hFlight: R.heightFlight, t: R.flightTime, agree: R.agree, cal: rec.calibrated, sim: !!sim };
+  const j = { id: uid(), ts: Date.now(), athleteId: a, h: R.height, hStand: R.heightStanding, hFlight: R.heightFlight, t: R.flightTime, agree: R.agree, cal: rec.calibrated, sim: !!sim };
   jumps.unshift(j); saveJumps();
   // next in the lineup is up
   if (cap.queue.length > 1 && cap.queue.includes(a)) cap.athleteId = cap.queue[(cap.queue.indexOf(a) + 1) % cap.queue.length];
@@ -1457,15 +1457,15 @@ function jumpHTML() {
   if (!ready && athletes.length) h += `<div class="card"><button class="btn primary" style="width:100%" data-act="jump-sim" ${pod.simming ? "disabled" : ""}>Simulate a jump · ${esc(firstName(cap.athleteId))}</button></div>`;
   if (pod.lastRes && !pod.lastRes.ok && !pod.simming) h += `<div class="card"><b>${esc(pod.lastRes.why)}</b></div>`;
   if (last) {
-    h += `<div class="card"><div class="between"><div class="label">Last jump · ${esc(athleteById(last.athleteId).name)}${last.sim ? " · simulated" : ""}</div></div><div class="jump-big">${fmtJump(last.h)}<small>${jumpUnit()}</small></div>
-      <div class="small muted">${fmtJumpAlt(last.h)} · a jump mat would read ${fmtJump(last.hFlight)} ${jumpUnit()} (flight time ${last.t.toFixed(3)} s)${last.agree ? "" : " · <b style=\"color:var(--warn)\">flight time differs because you landed lower than takeoff; the height doesn't depend on the landing</b>"}${last.cal ? "" : " · pod not calibrated"}</div></div>`;
+    h += `<div class="card"><div class="between"><div class="label">Last jump · ${esc(athleteById(last.athleteId).name)}${last.sim ? " · simulated" : ""}</div></div><div class="jump-two"><div><div class="small muted">Takeoff to peak</div><div class="jump-big">${fmtJump(last.h)}<small>${jumpUnit()}</small></div><div class="small muted">${fmtJumpAlt(last.h)} · like a jump mat</div></div>${last.hStand != null ? `<div><div class="small muted">Standing to peak</div><div class="jump-big">${fmtJump(last.hStand)}<small>${jumpUnit()}</small></div><div class="small muted">${fmtJumpAlt(last.hStand)} · like Vertec</div></div>` : ""}</div>
+      <div class="small muted" style="margin-top:6px">A jump mat would read ${fmtJump(last.hFlight)} ${jumpUnit()} (flight time ${last.t.toFixed(3)} s)${last.agree ? "" : ": higher because you landed lower than takeoff. The numbers above don't depend on the landing."}${last.cal ? "" : " · pod not calibrated"}</div></div>`;
   }
   if (athletes.length) h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · hold &amp; drag to move</span></div>${lineupHTML("run")}`;
   h += `<button class="lu-add" data-act="ath-new">+ Add athlete</button>`;
   if (today.length) {
     const best = {}; today.forEach((j) => { if (!best[j.athleteId] || j.h > best[j.athleteId]) best[j.athleteId] = j.h; });
-    h += `<div class="card" style="margin-top:14px"><div class="label">Today · ${today.length} jump${today.length === 1 ? "" : "s"}</div>
-      <div class="list" style="margin-top:6px">${today.map((j) => `<div class="item"><div><b>${esc(athleteById(j.athleteId).name)}</b> <span class="small muted">${timeLabel(j.ts)}${j.sim ? " · sim" : ""}</span></div><div class="r"><b>${fmtJump(j.h)}</b> ${jumpUnit()}${j.h === best[j.athleteId] ? ` <span class="pill ok">best</span>` : ""} <button class="btn sm ghost" data-act="jump-del" data-id="${j.id}" aria-label="Delete">✕</button></div></div>`).join("")}</div></div>`;
+    h += `<div class="card" style="margin-top:14px"><div class="between"><div class="label">Today · ${today.length} jump${today.length === 1 ? "" : "s"}</div><span class="small muted">takeoff / standing</span></div>
+      <div class="list" style="margin-top:6px">${today.map((j) => `<div class="item"><div><b>${esc(athleteById(j.athleteId).name)}</b> <span class="small muted">${timeLabel(j.ts)}${j.sim ? " · sim" : ""}</span></div><div class="r"><b>${fmtJump(j.h)}</b>${j.hStand != null ? ` <span class="small muted">/ ${fmtJump(j.hStand)}</span>` : ""} ${jumpUnit()}${j.h === best[j.athleteId] ? ` <span class="pill ok">best</span>` : ""} <button class="btn sm ghost" data-act="jump-del" data-id="${j.id}" aria-label="Delete">✕</button></div></div>`).join("")}</div></div>`;
   }
   return h;
 }
