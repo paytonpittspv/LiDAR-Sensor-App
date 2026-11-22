@@ -3357,7 +3357,7 @@ function sessionsHTML() {
   let h = `<div class="between" style="align-items:center"><h1>Sessions</h1><button class="btn sm" data-act="sess-print" aria-expanded="${!!sessPick}">Print report</button></div>`;
   // pick which session to print (the most recent ones)
   if (sessPick) h += `<div class="card"><div class="between"><div class="label">Print which session?</div><button class="btn sm ghost" data-act="sess-print">Close</button></div>
-    <div class="list" style="margin-top:6px">${keys.slice(0, 10).map((k) => `<div class="item" data-act="day-report" data-id="${k}"><div><b>${dayLabel(k, true)}</b><div class="small muted">${days[k].length} run${days[k].length > 1 ? "s" : ""} · ${esc([...new Set(days[k].map((r) => athleteById(r.athleteId).name))].join(", "))}</div></div><div class="r" style="color:var(--purple);font-weight:700">Print</div></div>`).join("")}</div></div>`;
+    <div class="list" style="margin-top:6px">${keys.slice(0, 10).map((k) => `<div class="item" data-act="day-report" data-id="${k}"><div><b>${dayLabel(k, true)}</b><div class="small muted">${[days[k].length ? `${days[k].length} run${days[k].length > 1 ? "s" : ""}` : "", (jdays[k] || []).length ? `${jdays[k].length} jump${jdays[k].length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")} · ${esc([...new Set(days[k].concat(jdays[k] || []).map((r) => athleteById(r.athleteId).name))].join(", "))}</div></div><div class="r" style="color:var(--purple);font-weight:700">Print</div></div>`).join("")}</div></div>`;
   h += compareBar();
   for (const k of keys) {
     const list = days[k], jl = jdays[k] || [], who = [...new Set(list.concat(jl).map((r) => athleteById(r.athleteId).name))];
@@ -3555,7 +3555,7 @@ function analyticsHTML() {
   if (!athletes.length) return `<h1>Analytics</h1><div class="card empty">Add an athlete and save some runs to see trends.</div>`;
   if (!anState.athleteId || !athletes.find((a) => a.id === anState.athleteId)) anState.athleteId = settings.lastAthlete && athletes.find((a) => a.id === settings.lastAthlete) ? settings.lastAthlete : athletes[0].id;
   const mine = runs.filter((r) => r.athleteId === anState.athleteId), myJumps = jumps.filter((j) => j.athleteId === anState.athleteId);
-  const anReady = runs.some((r) => r.athleteId === anState.athleteId);
+  const anReady = runs.some((r) => r.athleteId === anState.athleteId) || jumps.some((j) => j.athleteId === anState.athleteId);
   let h = `<div class="between" style="align-items:center"><h1>Analytics</h1>${anReady ? `<button class="btn sm" data-act="an-report" aria-label="Print report">Print report</button>` : ""}</div><div class="chips" style="margin-bottom:12px">${athletes.map((a) => `<button class="chip" data-act="an-ath" data-id="${a.id}" aria-pressed="${a.id === anState.athleteId}">${esc(a.name)}</button>`).join("")}</div>`;
   if (!mine.length && !myJumps.length) return h + `<div class="card empty">No runs or jumps for ${esc(athleteById(anState.athleteId).name)} yet.</div>`;
   const tests = [...new Set(mine.map(testKey))].sort(); if (myJumps.length) tests.push("jump");
@@ -3796,13 +3796,13 @@ document.addEventListener("click", (e) => {
     case "cap-end": stopNow(); cap.phase = "summary"; render(); window.scrollTo(0, 0); break;
     case "cap-close": cap.session = null; saveSession(); cap.phase = "setup"; go("home"); break;
     case "cmp-report": { const t = anState.test, ids = (anState.cmp || []).filter((x) => runs.some((r) => r.athleteId === x && testKey(r) === t)); if (ids.length > 1) openCompareReport(t, ids); else toast("Pick at least two athletes to compare."); break; }
-    case "an-report": if (anState.athleteId && anState.test) openAthleteReport(anState.athleteId, anState.test); break;
+    case "an-report": if (anState.athleteId && anState.test) (anState.test === "jump" ? openJumpReport(anState.athleteId) : openAthleteReport(anState.athleteId, anState.test)); break;
     case "sess-print": {
       const ks = [...new Set(runs.map((r) => dayKey(r.ts)))];
-      if (ks.length === 1 && !sessPick) { openSessionReport(runs.filter((r) => dayKey(r.ts) === ks[0]).map((r) => r.id)); break; }
+      if (ks.length === 1 && !sessPick) { openSessionReport(runs.filter((r) => dayKey(r.ts) === ks[0]).map((r) => r.id), ks[0]); break; }
       sessPick = !sessPick; render(); break;
     }
-    case "day-report": sessPick = false; openSessionReport(runs.filter((r) => dayKey(r.ts) === id).map((r) => r.id)); render(); break;
+    case "day-report": sessPick = false; openSessionReport(runs.filter((r) => dayKey(r.ts) === id).map((r) => r.id), id); render(); break;
     case "cert-copy": copySetupLink(); break;
     case "go-level": e.preventDefault(); nav("level"); break;
     case "go-jump": nav("jump"); break;
@@ -4022,10 +4022,10 @@ function brandBlock(right) {
     <div class="logo">${LOGO}<div><div class="name">LiDAR SENSOR</div><div class="tagline">LASER SPEED · TF03 LiDAR · DESIGNED BY PAYTON PITTS</div></div></div>
     <div style="text-align:right;color:${INK2};font-size:12.5px;line-height:1.6">${right}</div></div>`;
 }
-function footer(page, pages) {
+function footer(page, pages, src = "LiDAR Sensor app · Benewake TF03 · 1000 readings per second") {
   return `<div class="foot"><div class="logo" style="gap:8px">${LOGO}<div><b>LiDAR SENSOR</b><div style="color:${INK2}">Tampa, FL</div></div></div>
     <div style="text-align:right"><b>Payton Pitts</b><div style="color:${INK2}">Designer · USF Track &amp; Field</div></div></div>
-    <div class="fine"><span>LiDAR Sensor app · Benewake TF03 · 1000 readings per second</span><span>Page ${page} of ${pages}</span></div>`;
+    <div class="fine"><span>${src}</span><span>Page ${page} of ${pages}</span></div>`;
 }
 const B = (x) => `<b>${x}</b>`;
 function speedTimeSVG(run) {
@@ -4390,11 +4390,17 @@ function sessionReport(list) {
   for (let i = 1; i < P; i++) h += `<div class="page">${head}${runsBox(chunks[i], true)}${footer(i + 1, P)}</div>`;
   return h;
 }
-function openSessionReport(ids) {
-  const list = runs.filter((r) => ids.includes(r.id));
-  if (!list.length) { toast("No saved runs in this session."); return; }
+function openSessionReport(ids, day) {
+  const list = runs.filter((r) => ids.includes(r.id)), hasJ = day && jumps.some((j) => dayKey(j.ts) === day);
+  if (!list.length && !hasJ) { toast("No saved runs in this session."); return; }
   const el = $("#report");
-  el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + sessionReport(list);
+  // the day's jumps go on a page of their own after the runs (or alone, on a jumps-only day)
+  let html = list.length ? sessionReport(list) : "";
+  if (hasJ) {
+    const n = (html.match(/class="page"/g) || []).length, tot = n + 1;
+    html = html.replace(/Page (\d+) of \d+/g, `Page $1 of ${tot}`) + jumpSessionPage(day, tot, tot);
+  }
+  el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + html;
   el.classList.remove("hidden"); el.scrollTop = 0;
   layoutReport(el);
 }
@@ -4589,6 +4595,98 @@ function layoutReport(el) {
     while (room() < 4 && k > 0.72) { k -= 0.02; body.style.zoom = k.toFixed(2); }
   });
   if (!el._resize) { el._resize = true; window.addEventListener("resize", () => { if (!el.classList.contains("hidden")) scale(); }); }
+}
+
+// ---------- vertical jump report: one athlete's jumps over time (Analytics > Vertical jump > Print report) ----------
+const cmF = (m) => (m * 100).toFixed(1), inF = (m) => (m / 0.0254).toFixed(1);
+function jumpReport(aid) {
+  const a = athleteById(aid), js = jumps.filter((j) => j.athleteId === aid).sort((x, y) => x.ts - y.ts);
+  const dfmt = (ts) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const sdate = (ts) => new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+  const tfmt = (ts) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const head = `<div class="rhead"><span>LiDAR SENSOR</span><span>VERTICAL JUMP REPORT</span></div>`;
+  const m = (k, v, u, sub, cls) => `<div class="m ${cls || ""}"><div class="k">${k}</div><div class="v">${v}${u ? `<small>${u}</small>` : ""}</div>${sub ? `<div class="k" style="margin-top:2px">${sub}</div>` : ""}</div>`;
+  const best = js.reduce((b, j) => (!b || j.h > b.h ? j : b), null), bestS = js.filter((j) => j.hStand != null).reduce((b, j) => (!b || j.hStand > b.hStand ? j : b), null);
+  const H = js.map((j) => j.h), avg = avgOf(H), sd = sdOf(H);
+  const days = [...new Set(js.map((j) => dayKey(j.ts)))].sort(), t0 = js[0].ts, t1 = js[js.length - 1].ts;
+  // best per session, both heights
+  const byDay = {}; for (const j of js) { const d = byDay[dayKey(j.ts)] || (byDay[dayKey(j.ts)] = { h: 0, s: 0, n: 0 }); d.h = Math.max(d.h, j.h); if (j.hStand != null) d.s = Math.max(d.s, j.hStand); d.n++; }
+  const dx = (k) => (new Date(k).getTime() - new Date(days[0]).getTime()) / 864e5, xEnd = Math.max(1, dx(days[days.length - 1]));
+  const xt = []; { const n = Math.min(6, days.length); for (let i = 0; i < n; i++) xt.push(n === 1 ? 0 : (xEnd * i) / (n - 1)); }
+  const xfmt = (t) => new Date(new Date(days[0]).getTime() + t * 864e5 + 12 * 36e5).toLocaleDateString([], { month: "short", day: "numeric" });
+  const X = days.map(dx), Y = days.map((d) => byDay[d].h * 100), S = days.map((d) => (byDay[d].s ? byDay[d].s * 100 : null));
+  const sx = X.filter((_, i) => S[i] != null), sy = S.filter((v) => v != null), all = Y.concat(sy);
+  const pad = Math.max(2, (Math.max(...all) - Math.min(...all)) * 0.2), y0 = Math.max(0, Math.min(...all) - pad), y1 = Math.max(...all) + pad;
+  const chart = svgChart({ aria: "Best jump per session", w: 730, h: 190, pad: [44, 14, 10, 30], x0: -0.4, x1: xEnd + 0.4, y0, y1, font: 11, textColor: INK2, gridColor: "#efecf6",
+    xt, xfmt, yt: niceTicks(y0, y1, 5).filter((t) => t >= y0 && t <= y1), yfmt: (t) => t.toFixed(0), yl: "cm",
+    series: [{ x: X, y: Y, color: ACC, w: 2.4 }].concat(sy.length ? [{ x: sx, y: sy, color: ACC2, w: 2, dash: "5 4" }] : []),
+    dots: X.map((x, i) => ({ x, y: Y[i], r: 3.6, fill: "#fff", stroke: ACC, sw: 1.9 })).concat(sx.map((x, i) => ({ x, y: sy[i], r: 3, fill: "#fff", stroke: ACC2, sw: 1.6 }))) });
+  // the squad: everyone's best, as bars
+  const tops = athletes.map((x) => ({ x, j: jumps.filter((j) => j.athleteId === x.id).reduce((b, j) => (!b || j.h > b.h ? j : b), null) })).filter((t) => t.j).sort((p, q) => q.j.h - p.j.h);
+  const mx = tops.length ? tops[0].j.h : 1;
+  const squad = tops.length > 1 ? `<div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>The squad · best takeoff to peak</h4><span style="color:${INK2};font-size:11px">cm</span></div>
+    ${tops.slice(0, 10).map(({ x, j }) => `<div style="display:grid;grid-template-columns:150px 1fr 54px;align-items:center;gap:10px;margin:5px 0;font-size:12.5px">
+      <span style="font-weight:${x.id === aid ? 700 : 400};color:${x.id === aid ? ACC : INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.name)}</span>
+      <span style="height:9px;border-radius:5px;background:#f1eef8;overflow:hidden"><b style="display:block;height:100%;width:${((100 * j.h) / mx).toFixed(1)}%;border-radius:5px;background:${x.id === aid ? `linear-gradient(90deg,${ACC},${ACC2},${ACC3})` : "#c9c3dd"}"></b></span>
+      <span style="text-align:right;font-weight:700">${cmF(j.h)}</span></div>`).join("")}</div>` : "";
+  // takeaways
+  const notes = [];
+  if (days.length > 1) { const ch = Y[Y.length - 1] - Y[0]; notes.push(`Best jump at the latest session ${B(Y[Y.length - 1].toFixed(1) + " cm")}, ${ch >= 0 ? "up" : "down"} ${Math.abs(ch).toFixed(1)} cm from the first (${Y[0].toFixed(1)} cm).`); }
+  if (best) notes.push(`Best ${B(cmF(best.h) + " cm")} (${inF(best.h)} in) on ${dfmt(best.ts)}; average ${cmF(avg)} cm${sd != null ? `, varying ±${cmF(sd)} cm jump to jump` : ""}.`);
+  const ext = js.filter((j) => j.hStand != null).map((j) => j.hStand - j.h); if (ext.length) notes.push(`Standing tall to leaving the ground on the toes adds about ${B(cmF(avgOf(ext)) + " cm")} on top: standing to peak is the jump-and-reach (Vertec) number.`);
+  const mat = js.filter((j) => j.hFlight != null).map((j) => j.hFlight - j.h); if (mat.length) notes.push(`A jump mat (flight time) would read ${cmF(Math.abs(avgOf(mat)))} cm ${avgOf(mat) >= 0 ? "higher" : "lower"} on average: landing with bent knees stretches the flight time. The pod's number doesn't depend on the landing.`);
+  if (js.some((j) => !j.cal)) notes.push(`Some jumps were measured before the pod was calibrated (±1.5 cm instead of ±0.3 cm).`);
+  if (js.some((j) => j.sim)) notes.push(`Includes simulated jumps (marked sim).`);
+  const pages = 2;
+  const p1 = `<div class="page">${head}
+    <div class="box btop">${brandBlock(`Vertical jump report<br>Waist pod · BMI160 · 1600 Hz · <b style="color:${INK}">±0.3 cm calibrated</b>`)}
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:12px;gap:12px;flex-wrap:wrap">
+        <div><div class="eyebrow">VERTICAL JUMP · COUNTERMOVEMENT</div><div class="who">${esc(a.name)}</div></div>
+        <div style="color:${INK2};font-size:13px;text-align:right">${dfmt(t0)}${dayKey(t0) !== dayKey(t1) ? ` – ${dfmt(t1)}` : ""}<br>${js.length} jump${js.length > 1 ? "s" : ""} · ${days.length} session${days.length > 1 ? "s" : ""}</div></div>
+      <div class="metrics" style="grid-template-columns:1.35fr 1fr 1fr 1fr">
+        <div class="m hero" style="grid-row:auto"><div class="k">Best · takeoff to peak</div><div class="v" style="font-size:40px">${best ? cmF(best.h) : "—"}<small style="font-size:16px">cm</small></div><div class="k">${best ? `${inF(best.h)} in · ${dfmt(best.ts)}` : ""}</div></div>
+        ${m("Best · standing to peak", bestS ? cmF(bestS.hStand) : "—", "cm", bestS ? `${inF(bestS.hStand)} in · like Vertec` : "")}
+        ${m("Average", cmF(avg), "cm", sd != null ? `±${cmF(sd)} jump to jump` : "")}
+        ${m("Jump mat would read", best && best.hFlight != null ? cmF(best.hFlight) : "—", "cm", best ? `best jump · flight ${best.t.toFixed(3)} s` : "", "hl")}
+      </div></div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Best jump per session</h4><span style="color:${INK2};font-size:11px">${SW_LINE(ACC)} takeoff to peak &nbsp; ${SW_LINE(ACC2, 2)} standing to peak</span></div>${chart}</div>
+    ${squad}
+    <div class="box"><h4>Key takeaways</h4><ul class="sum">${notes.slice(0, 6).map((n) => `<li>${n}</li>`).join("")}</ul></div>
+    ${footer(1, pages, "LiDAR Sensor app · waist pod · BMI160 · 1600 readings per second")}</div>`;
+  const recent = js.slice(-26).reverse(), bestId = best ? best.id : null;
+  const tbl = `<table class="ctab"><thead><tr><th>Date</th><th>Time</th><th>Takeoff to peak</th><th>Standing to peak</th><th>Jump mat</th><th>Flight</th><th></th></tr></thead><tbody>${recent.map((j) => `<tr>
+    <td>${sdate(j.ts)}</td><td>${tfmt(j.ts)}</td><td class="${j.id === bestId ? "lead" : ""}">${cmF(j.h)} cm</td><td>${j.hStand != null ? cmF(j.hStand) + " cm" : "–"}</td><td>${j.hFlight != null ? cmF(j.hFlight) + " cm" : "–"}</td><td>${j.t ? j.t.toFixed(3) + " s" : "–"}</td>
+    <td style="color:${INK2}">${j.sim ? "sim" : j.cal ? "" : "not cal."}</td></tr>`).join("")}</tbody></table>`;
+  const ses = days.slice(-12).reverse().map((d) => { const l = js.filter((j) => dayKey(j.ts) === d), hs = l.map((j) => j.h); return `<tr><td>${dfmt(new Date(d).getTime() + 12 * 36e5)}</td><td>${l.length}</td><td class="lead">${cmF(Math.max(...hs))} cm</td><td>${cmF(avgOf(hs))} cm</td><td>${byDay[d].s ? cmF(byDay[d].s) + " cm" : "–"}</td></tr>`; }).join("");
+  const p2 = `<div class="page">${head}
+    <div class="box"><h4>Sessions</h4><table class="ctab"><thead><tr><th>Session</th><th>Jumps</th><th>Best</th><th>Average</th><th>Best standing to peak</th></tr></thead><tbody>${ses}</tbody></table></div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Jumps${js.length > recent.length ? ` · latest ${recent.length} of ${js.length}` : ""}</h4><span style="color:${INK2};font-size:11px">best in pink</span></div>${tbl}</div>
+    <div style="color:${INK2};font-size:11px;line-height:1.5;margin-top:4px">Takeoff to peak: how far the hips rise after the feet leave the ground (what a jump mat aims to measure). Standing to peak: from standing tall to the highest point (like a jump-and-reach test). Measured by the waist pod from the motion itself, from standing still to the top of the jump, so the landing doesn't change it.</div>
+    ${footer(2, pages, "LiDAR Sensor app · waist pod · BMI160 · 1600 readings per second")}</div>`;
+  return p1 + p2;
+}
+function openJumpReport(aid) {
+  if (!jumps.some((j) => j.athleteId === aid)) { toast("No jumps for this athlete yet."); return; }
+  const el = $("#report");
+  el.innerHTML = `<div class="bar"><button data-rep="close">‹ Close</button><button data-rep="print">Print / Save PDF</button></div>` + jumpReport(aid);
+  el.classList.remove("hidden"); el.scrollTop = 0;
+  layoutReport(el);
+}
+// a session's jumps (added to that day's session report): everyone who jumped, best first, every jump
+function jumpSessionPage(day, page, pages) {
+  const js = jumps.filter((j) => dayKey(j.ts) === day); if (!js.length) return "";
+  const by = {}; for (const j of js) (by[j.athleteId] = by[j.athleteId] || []).push(j);
+  const rows = Object.entries(by).map(([aid, l]) => ({ aid, l, best: l.reduce((b, j) => (j.h > b.h ? j : b)) })).sort((p, q) => q.best.h - p.best.h);
+  const mx = rows[0].best.h, tfmt = (ts) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const head = `<div class="rhead"><span>LiDAR SENSOR</span><span>SESSION · VERTICAL JUMP</span></div>`;
+  return `<div class="page">${head}
+    <div class="box btop">${brandBlock(`Vertical jump · ${new Date(day + "T12:00").toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" })}<br>${js.length} jump${js.length > 1 ? "s" : ""} · ${rows.length} athlete${rows.length > 1 ? "s" : ""}`)}</div>
+    <div class="box"><div style="display:flex;justify-content:space-between;align-items:baseline"><h4>Best takeoff to peak</h4><span style="color:${INK2};font-size:11px">cm</span></div>
+      ${rows.map((r, i) => `<div style="display:grid;grid-template-columns:150px 1fr 54px;align-items:center;gap:10px;margin:5px 0;font-size:12.5px"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:${i ? 400 : 700}">${esc(athleteById(r.aid).name)}</span>
+        <span style="height:9px;border-radius:5px;background:#f1eef8;overflow:hidden"><b style="display:block;height:100%;width:${((100 * r.best.h) / mx).toFixed(1)}%;border-radius:5px;background:${SESS_COLORS[i % SESS_COLORS.length]}"></b></span><span style="text-align:right;font-weight:700">${cmF(r.best.h)}</span></div>`).join("")}</div>
+    <div class="box"><h4>Every jump</h4><table class="ctab"><thead><tr><th>Athlete</th><th>Time</th><th>Takeoff to peak</th><th>Standing to peak</th><th>Jump mat</th></tr></thead><tbody>
+      ${rows.map((r) => r.l.slice().sort((p, q) => p.ts - q.ts).map((j) => `<tr><td>${esc(athleteById(r.aid).name)}</td><td>${tfmt(j.ts)}${j.sim ? ` <span style="color:${INK2}">sim</span>` : ""}</td><td class="${j === r.best ? "lead" : ""}">${cmF(j.h)} cm</td><td>${j.hStand != null ? cmF(j.hStand) + " cm" : "–"}</td><td>${j.hFlight != null ? cmF(j.hFlight) + " cm" : "–"}</td></tr>`).join("")).join("")}</tbody></table></div>
+    ${footer(page, pages, "LiDAR Sensor app · waist pod · BMI160 · 1600 readings per second")}</div>`;
 }
 
 // ---------- athlete report (Analytics > Print report): one athlete, one test, over time; watts included ----------

@@ -1950,7 +1950,7 @@ function sessionsHTML() {
   let h = `<div class="between" style="align-items:center"><h1>Sessions</h1><button class="btn sm" data-act="sess-print" aria-expanded="${!!sessPick}">Print report</button></div>`;
   // pick which session to print (the most recent ones)
   if (sessPick) h += `<div class="card"><div class="between"><div class="label">Print which session?</div><button class="btn sm ghost" data-act="sess-print">Close</button></div>
-    <div class="list" style="margin-top:6px">${keys.slice(0, 10).map((k) => `<div class="item" data-act="day-report" data-id="${k}"><div><b>${dayLabel(k, true)}</b><div class="small muted">${days[k].length} run${days[k].length > 1 ? "s" : ""} · ${esc([...new Set(days[k].map((r) => athleteById(r.athleteId).name))].join(", "))}</div></div><div class="r" style="color:var(--purple);font-weight:700">Print</div></div>`).join("")}</div></div>`;
+    <div class="list" style="margin-top:6px">${keys.slice(0, 10).map((k) => `<div class="item" data-act="day-report" data-id="${k}"><div><b>${dayLabel(k, true)}</b><div class="small muted">${[days[k].length ? `${days[k].length} run${days[k].length > 1 ? "s" : ""}` : "", (jdays[k] || []).length ? `${jdays[k].length} jump${jdays[k].length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")} · ${esc([...new Set(days[k].concat(jdays[k] || []).map((r) => athleteById(r.athleteId).name))].join(", "))}</div></div><div class="r" style="color:var(--purple);font-weight:700">Print</div></div>`).join("")}</div></div>`;
   h += compareBar();
   for (const k of keys) {
     const list = days[k], jl = jdays[k] || [], who = [...new Set(list.concat(jl).map((r) => athleteById(r.athleteId).name))];
@@ -2148,7 +2148,7 @@ function analyticsHTML() {
   if (!athletes.length) return `<h1>Analytics</h1><div class="card empty">Add an athlete and save some runs to see trends.</div>`;
   if (!anState.athleteId || !athletes.find((a) => a.id === anState.athleteId)) anState.athleteId = settings.lastAthlete && athletes.find((a) => a.id === settings.lastAthlete) ? settings.lastAthlete : athletes[0].id;
   const mine = runs.filter((r) => r.athleteId === anState.athleteId), myJumps = jumps.filter((j) => j.athleteId === anState.athleteId);
-  const anReady = runs.some((r) => r.athleteId === anState.athleteId);
+  const anReady = runs.some((r) => r.athleteId === anState.athleteId) || jumps.some((j) => j.athleteId === anState.athleteId);
   let h = `<div class="between" style="align-items:center"><h1>Analytics</h1>${anReady ? `<button class="btn sm" data-act="an-report" aria-label="Print report">Print report</button>` : ""}</div><div class="chips" style="margin-bottom:12px">${athletes.map((a) => `<button class="chip" data-act="an-ath" data-id="${a.id}" aria-pressed="${a.id === anState.athleteId}">${esc(a.name)}</button>`).join("")}</div>`;
   if (!mine.length && !myJumps.length) return h + `<div class="card empty">No runs or jumps for ${esc(athleteById(anState.athleteId).name)} yet.</div>`;
   const tests = [...new Set(mine.map(testKey))].sort(); if (myJumps.length) tests.push("jump");
@@ -2389,13 +2389,13 @@ document.addEventListener("click", (e) => {
     case "cap-end": stopNow(); cap.phase = "summary"; render(); window.scrollTo(0, 0); break;
     case "cap-close": cap.session = null; saveSession(); cap.phase = "setup"; go("home"); break;
     case "cmp-report": { const t = anState.test, ids = (anState.cmp || []).filter((x) => runs.some((r) => r.athleteId === x && testKey(r) === t)); if (ids.length > 1) openCompareReport(t, ids); else toast("Pick at least two athletes to compare."); break; }
-    case "an-report": if (anState.athleteId && anState.test) openAthleteReport(anState.athleteId, anState.test); break;
+    case "an-report": if (anState.athleteId && anState.test) (anState.test === "jump" ? openJumpReport(anState.athleteId) : openAthleteReport(anState.athleteId, anState.test)); break;
     case "sess-print": {
       const ks = [...new Set(runs.map((r) => dayKey(r.ts)))];
-      if (ks.length === 1 && !sessPick) { openSessionReport(runs.filter((r) => dayKey(r.ts) === ks[0]).map((r) => r.id)); break; }
+      if (ks.length === 1 && !sessPick) { openSessionReport(runs.filter((r) => dayKey(r.ts) === ks[0]).map((r) => r.id), ks[0]); break; }
       sessPick = !sessPick; render(); break;
     }
-    case "day-report": sessPick = false; openSessionReport(runs.filter((r) => dayKey(r.ts) === id).map((r) => r.id)); render(); break;
+    case "day-report": sessPick = false; openSessionReport(runs.filter((r) => dayKey(r.ts) === id).map((r) => r.id), id); render(); break;
     case "cert-copy": copySetupLink(); break;
     case "go-level": e.preventDefault(); nav("level"); break;
     case "go-jump": nav("jump"); break;
