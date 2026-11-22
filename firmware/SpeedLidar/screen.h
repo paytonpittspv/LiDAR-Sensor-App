@@ -129,8 +129,8 @@ static void bigNum(const char* v, float x, float y, int size, RGB col, const cha
 }
 
 // ---------- what to show (filled in by the firmware) ----------
-enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM, S_ABOUT, S_LEVEL };
-static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim", "about", "level"};
+enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM, S_ABOUT, S_LEVEL, S_JUMP };
+static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim", "about", "level", "jump"};
 struct Cell { char k[14], v[14], u[8]; };
 struct Model {
   Screen screen = S_BOOT;
@@ -157,6 +157,10 @@ struct Model {
   // tilt sensor: the level, and whether the tripod was bumped since it was aimed
   bool imuOk = false, zeroed = false, bumped = false;
   float pitch = 0, roll = 0, levelAt = 30.48f, bumpDeg = 0; char bumpWhy[12] = "";
+  // jump test (waist pods): who's up, which pod, their best today; live phase; the last result while the app shows it
+  char jWho[24] = "", jPod[12] = "", jBest[8] = "", jNext[24] = "";
+  int jPh = 0; float jV = 0; uint32_t jAirMs = 0;
+  bool jRes = false; char jH[8] = "", jHs[8] = "", jHm[8] = "", jRWho[24] = "";
 };
 
 static void fmtFt(char* out, size_t n, float m) {
@@ -372,6 +376,59 @@ static void drawLevel(const Model& M) {
   foot(M.zeroed ? "Tilt the tripod head until it's green" : "Not zeroed yet: zero it in the app", M.bumped ? "moved since aimed" : "BMI160");
 }
 
+// Jump test: who's up (stand still), set (jump when ready), in the air (a bar rising with the height, from the
+// takeoff speed the pod sends), then the result (takeoff to peak, big; standing to peak and what a jump mat says)
+static void drawJump(const Model& M) {
+  if (M.jRes) {
+    strip(M, "VERTICAL JUMP", BLUE);
+    text(F_B13, "TAKEOFF TO PEAK", 10, 42, DIM);
+    bigNum(M.jH, 10, 100, 72, BLUE, "cm");
+    if (M.jHs[0]) { text(F_B11, "STANDING TO PEAK", 10, 120, DIM); bigNum(M.jHs, 10, 140, 18, FG, "cm"); }
+    if (M.jHm[0]) { text(F_B11, "JUMP MAT", 170, 120, DIM); bigNum(M.jHm, 170, 140, 18, FG, "cm"); }
+    char r[40]; snprintf(r, sizeof r, M.jNext[0] ? "next: %s" : "%s", M.jNext);
+    foot(M.jRWho, r);
+    return;
+  }
+  if (M.jPh == 2 || (M.jPh == 3 && M.jV > 0)) {
+    strip(M, M.jPh == 2 ? "IN THE AIR" : "LANDED", PURPLE);
+    const float g = 9.80665f, t = M.jAirMs / 1000.f, tp = M.jV / g, peak = M.jV * M.jV / (2 * g);
+    float h = M.jV > 0 ? (t >= tp ? peak : M.jV * t - g * t * t / 2) : 0; if (h < 0) h = 0;
+    float best = atof(M.jBest) / 100.f, top = fmaxf(.7f, ceilf(fmaxf(best, peak) * 1.2f * 10) / 10);
+    const float bx = 12, by = 30, bw = 34, bh = H - 30 - 28;
+    rrect(bx, by, bw, bh, 8, LINE);
+    float fh = bh * fminf(1.f, h / top); if (fh > 1) rrect(bx, by + bh - fh, bw, fh, 8, FG, bx, bx + bw);
+    for (int c = 10; c < top * 100; c += 10) { float y = by + bh - bh * (c / 100.f) / top; rect((int)bx, (int)y, (int)bw, 1, BG); }
+    if (best > 0) { float y = by + bh - bh * fminf(1.f, best / top); rect((int)bx - 4, (int)y - 1, (int)bw + 8, 3, PINK); }
+    char v[8]; snprintf(v, sizeof v, "%.0f", h * 100);
+    text(F_B13, "HEIGHT", 64, 44, DIM);
+    bigNum(v, 64, 110, 80, FG, "cm", LEFT, W - 74);
+    foot(M.jWho, t >= tp ? "peak \xC2\xB7 exact number next" : M.jPod);
+    return;
+  }
+  if (M.jPh == 1) {
+    float p = pulse(M.t, 260);
+    strip(M, "SET", PINK);
+    RGB c = mix(BG, PINK, .35f + .65f * p);
+    rect(2, 24, W - 4, 4, c); rect(2, H - 6, W - 4, 4, c); rect(2, 24, 4, H - 28, c); rect(W - 6, 24, 4, H - 28, c);
+    text(F_XB58, "JUMP WHEN", W / 2, 86, FG, CENTER); text(F_XB58, "READY", W / 2, 136, PINK, CENTER);
+    text(F_S11, M.jWho, 12, H - 10, DIM); text(F_S11, M.jPod, W - 12, H - 10, DIM, RIGHT);
+    return;
+  }
+  if (M.jPh == 3) {
+    strip(M, "LANDED", PURPLE);
+    text(F_XB34, "STAND STILL", W / 2, 84, FG, CENTER);
+    text(F_S13, "The height shows here in a second.", W / 2, 110, DIM, CENTER);
+    foot(M.jWho, M.jPod);
+    return;
+  }
+  strip(M, "JUMP TEST", GREEN);
+  text(F_B13, "UP NOW", 10, 44, DIM);
+  text(F_XB34, M.jWho[0] ? M.jWho : "-", 10, 82, FG);
+  text(F_S13, "Stand still, jump, land and stand still", 10, 108, GREEN);
+  if (M.jBest[0]) { text(F_B11, "BEST TODAY", 10, 134, DIM); char b[16]; snprintf(b, sizeof b, "%s cm", M.jBest); text(F_XB18, b, 100, 136, FG); }
+  foot("Vertical jump", M.jPod);
+}
+
 static void draw(const Model& M) {
   fill(BG);
   switch (M.screen) {
@@ -387,6 +444,7 @@ static void draw(const Model& M) {
     case S_AIM: drawAim(M); break;
     case S_ABOUT: drawAbout(M); break;
     case S_LEVEL: drawLevel(M); break;
+    case S_JUMP: drawJump(M); break;
   }
 }
 

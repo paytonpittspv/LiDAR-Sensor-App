@@ -2782,6 +2782,26 @@ function podWatch() {
     if (P.seq !== st.seq && !st.busy) { st.seq = P.seq; podFetch(P.id); }
   }
   if (redraw) { if (!luDrag.dragging) render(); if (pod.air) airTick(); }
+  if (view === "jump") jumpScreen();
+}
+// The sensor's own screen shows the Jump test while it's open here: who's up, the live phases (the sensor reads
+// those from the pods itself) and the result while it's up on this page. Sent about once a second.
+function jumpScreen(off) {
+  if (!sensor.connected || cap.sim || disp.on) return;
+  if (!off && Date.now() - (jumpScreen.at || 0) < 900) return;
+  jumpScreen.at = Date.now();
+  const b = { who: "", pod: "", best: "", next: "" };
+  if (off) b.off = 1;
+  else {
+    const on = podsOn(), P = on.find((p) => p.id === pod.focus) || on[0], wid = podWearer(P && P.id), a = athletes.find((x) => x.id === wid);
+    b.who = a ? a.name.slice(0, 23) : ""; b.pod = P && on.length > 1 ? podName(P.id) : on.length ? "Waist pod" : "No pod";
+    const best = jumps.filter((j) => j.athleteId === wid && dayKey(j.ts) === dayKey(Date.now())).reduce((m, j) => Math.max(m, j.h), 0);
+    if (best) b.best = (best * 100).toFixed(1);
+    const nx = athletes.find((x) => x.id === cap.athleteId); b.next = nx ? nx.name.slice(0, 23) : "";
+    const s = pod.show && jumps.find((j) => j.id === pod.show);
+    if (s) Object.assign(b, { res: 1, h: (s.h * 100).toFixed(1), hs: s.hStand != null ? (s.hStand * 100).toFixed(1) : "", hm: (s.hFlight * 100).toFixed(1), rw: athleteById(s.athleteId).name.slice(0, 23) });
+  }
+  fetch("/jump", { method: "POST", body: new URLSearchParams(b), cache: "no-store" }).catch(() => {});
 }
 function podMessage(m, id) {
   const [what, res] = m.split(":"), who = (sensor.pods || []).length > 1 ? `${podName(id)}: ` : "";
@@ -2817,6 +2837,7 @@ function podJump(rec, sim, podId) {
   settings.lastAthlete = cap.athleteId; saveSettings();
   say(`${(podsOn().length > 1 ? firstName(a) + ", " : "")}${(R.height * 100).toFixed(0)} centimeters`);
   render();
+  jumpScreen.at = 0; jumpScreen();
 }
 function podVault(rec) {
   // the latest vault run on the runway (not a pole run: that has no pit landing), finished within the last 90 s
@@ -2979,6 +3000,7 @@ function jumpSim() {
 // ---------------- views ----------------
 let view = "home", viewArg = null;
 function go(v, arg, resume) {
+  if (view === "jump" && v !== "jump") jumpScreen(true);   // the sensor's screen goes back to normal
   view = v; viewArg = arg == null ? null : arg;
   // New session opens on its first page (sprint or vault, who's running, where to stop) unless a run is being recorded
   // right now, or you're coming back to it (from adding an athlete, say): then it stays where you were
@@ -3723,7 +3745,7 @@ document.addEventListener("click", (e) => {
     case "pod-send": podCmd({ do: "send", id }).then((j) => j && j.online && toast(`Asked the ${podName(id).toLowerCase()} for its last 14 s.`)); break;
     case "pod-color": { const c = settings.podColors || (settings.podColors = {}); const other = Object.keys(c).find((k) => k !== id && c[k] === v); if (other) c[other] = c[id]; c[id] = v; saveSettings(); render(); break; }
     case "jump-sim": jumpSim(); break;
-    case "jump-next": pod.show = null; render(); break;
+    case "jump-next": pod.show = null; render(); jumpScreen.at = 0; jumpScreen(); break;
     case "jump-each": settings.jumpEach = +v; pod.turn = 0; saveSettings(); render(); break;
     case "jump-del": jumps = jumps.filter((j) => j.id !== id); saveJumps(); render(); break;
     case "lv-do": lvDo(v); break;

@@ -41,6 +41,12 @@ int main(int argc, char** argv) {
     L.pitch = -.18f; L.roll = .2f; draw(L); save(out + "/level_close.ppm");
     L.pitch = .03f; L.roll = .05f; draw(L); save(out + "/level_good.ppm");
     L.imuOk = false; draw(L); save(out + "/level_none.ppm"); }
+  { Model J = M; J.screen = S_JUMP; strcpy(J.jWho, "Jordan Lee"); strcpy(J.jPod, "Blue pod"); strcpy(J.jBest, "48.0");
+    J.jPh = 0; draw(J); save(out + "/jump_ready.ppm");
+    J.jPh = 1; J.t = 0; draw(J); save(out + "/jump_set.ppm");
+    J.jPh = 2; J.jV = 2.9f; J.jAirMs = 180; draw(J); save(out + "/jump_air.ppm");
+    J.jAirMs = 400; draw(J); save(out + "/jump_peak.ppm");
+    J.jRes = true; strcpy(J.jH, "42.8"); strcpy(J.jHs, "51.9"); strcpy(J.jHm, "44.1"); strcpy(J.jRWho, "Jordan Lee"); strcpy(J.jNext, "Sam Ortiz"); draw(J); save(out + "/jump_result.ppm"); }
   { Model B = M; B.screen = S_READY; B.inZone = false; B.hold = 0; B.bumped = true; B.bumpDeg = -.6f; strcpy(B.bumpWhy, "tilted"); draw(B); save(out + "/ready_bumped.ppm"); }
   return 0;
 }
