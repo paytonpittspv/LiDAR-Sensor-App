@@ -24,7 +24,7 @@
 #include <Preferences.h>
 #include <esp_sleep.h>
 
-static const char* FW = "pod-1.0";
+static const char* FW = "pod-1.1";
 static const char* SSID = "SpeedLidar";
 static const char* PASS = "vault1234";
 static const char* SENSOR = "http://192.168.4.1";
@@ -178,11 +178,16 @@ bool pushCapture() {
   int code = http.POST(buf, len); http.end(); free(buf);
   return code == 200;
 }
+// what the jumper is doing, for the app's live screen: 0 moving · 1 standing still (ready) · 2 in the air · 3 landed
+uint8_t phaseNow() {
+  if (flightAt) return ffRun > 0 ? 2 : 3;
+  return stillRun >= (uint32_t)(HZ / 2) ? 1 : 0;
+}
 void hello() {
   HTTPClient http; http.setTimeout(1500);
   char q[200];
-  snprintf(q, sizeof q, "%s/pod/hello?fw=%s&imu=%d&cal=%d&sides=%u&rssi=%d&still=%d&up=%lu&msg=%s", SENSOR, FW, imuOk ? 1 : 0, calibrated ? 1 : 0,
-           (unsigned)sidesDone, WiFi.RSSI(), stillRun >= (uint32_t)HZ ? 1 : 0, (unsigned long)(millis() / 1000), lastMsg.c_str());
+  snprintf(q, sizeof q, "%s/pod/hello?fw=%s&imu=%d&cal=%d&sides=%u&rssi=%d&still=%d&ph=%u&up=%lu&msg=%s", SENSOR, FW, imuOk ? 1 : 0, calibrated ? 1 : 0,
+           (unsigned)sidesDone, WiFi.RSSI(), stillRun >= (uint32_t)HZ ? 1 : 0, (unsigned)phaseNow(), (unsigned long)(millis() / 1000), lastMsg.c_str());
   http.begin(q);
   if (http.GET() != 200) { http.end(); return; }
   String r = http.getString(); http.end();
@@ -235,7 +240,9 @@ void loop() {
   if (!up) digitalWrite(PIN_LED, (now / 500) % 2 ? HIGH : LOW);
   else { if (now - ledAt > 2000) ledAt = now; digitalWrite(PIN_LED, now - ledAt < 60 ? LOW : HIGH); }
   if (up && sendNow) { sendNow = false; digitalWrite(PIN_LED, LOW); bool ok = pushCapture(); lastMsg = ok ? "sent" : "send:failed"; helloAt = 0; }
-  if (up && now - helloAt > 1000) { helloAt = now; hello(); }
+  // check in every second, and straight away when the jumper's phase changes (the app's live screen)
+  static uint8_t lastPh = 255; uint8_t ph = phaseNow();
+  if (up && (now - helloAt > 1000 || (ph != lastPh && now - helloAt > 40))) { helloAt = now; lastPh = ph; hello(); }
   if (!up && now % 10000 < 20) WiFi.reconnect();
   if (now - lastMove > SLEEP_MS) goToSleep();
   delay(10);

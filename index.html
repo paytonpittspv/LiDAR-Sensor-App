@@ -2692,7 +2692,7 @@ let jumps = DB.get("jumps", []);
 const saveJumps = () => DB.set("jumps", jumps);
 const pod = { seq: null, msgSeq: null, busy: false, last: null, lastRes: null, calMsg: "", fwMsg: "", athleteId: null };
 const POD_FW_URL = "https://github.com/paytonpittspv/LiDAR-Sensor-App/releases/download/firmware/Pod.bin";
-const podIn = () => lvImperial();   // jump heights in inches when weights are in lb
+const podIn = () => false;   // jump heights in centimetres (inches shown underneath)
 const fmtJump = (m) => (podIn() ? `${(m / 0.0254).toFixed(1)}` : `${(m * 100).toFixed(1)}`), jumpUnit = () => (podIn() ? "in" : "cm");
 const fmtJumpAlt = (m) => (podIn() ? `${(m * 100).toFixed(1)} cm` : `${(m / 0.0254).toFixed(1)} in`);
 const podRest = () => settings.podRest || 1.0;   // the pod's height off the ground lying on the mat (m)
@@ -2715,6 +2715,12 @@ function podWatch() {
   if (P.on && !settings.podSeen) { settings.podSeen = true; saveSettings(); }
   if (pod.msgSeq !== null && P.msgSeq !== pod.msgSeq && P.msg) podMessage(P.msg);
   pod.msgSeq = P.msgSeq;
+  if (view === "jump" && pod.simPh == null) {
+    const ph = P.on ? P.ph || 0 : -1;
+    // the result stays until the pod has moved (handed over, or walked back) and someone stands still with it again
+    if (pod.show) { if (ph === 0) pod.sawMove = true; else if (ph === 1 && pod.sawMove && Date.now() - pod.showAt > 3000) { pod.show = null; pod.lastPh = null; } }
+    if (ph !== pod.lastPh) { pod.lastPh = ph; if (!luDrag.dragging) render(); }
+  }
   if (pod.seq === null) { pod.seq = P.seq; return; }       // what was there before the app opened isn't new
   if (P.seq !== pod.seq && !pod.busy) { pod.seq = P.seq; podFetch(); }
 }
@@ -2727,7 +2733,7 @@ function podMessage(m) {
   else if (what === "uncal") { pod.calMsg = "Calibration cleared."; render(); }
 }
 async function podFetch() {
-  pod.busy = true;
+  pod.busy = true; if (view === "jump") render();
   try {
     const rec = parsePod(await (await fetch("/pod/data", { cache: "no-store" })).arrayBuffer());
     if (!rec) return;
@@ -2743,8 +2749,10 @@ function podJump(rec, sim) {
   const a = cap.athleteId || settings.lastAthlete || (athletes[0] && athletes[0].id);
   const j = { id: uid(), ts: Date.now(), athleteId: a, h: R.height, hStand: R.heightStanding, hFlight: R.heightFlight, t: R.flightTime, agree: R.agree, cal: rec.calibrated, sim: !!sim };
   jumps.unshift(j); saveJumps();
-  // next in the lineup is up
-  if (cap.queue.length > 1 && cap.queue.includes(a)) cap.athleteId = cap.queue[(cap.queue.indexOf(a) + 1) % cap.queue.length];
+  // the result stays up (see jumpHTML); whoever is next is lined up behind it
+  pod.show = j.id; pod.showAt = Date.now(); pod.sawMove = false;
+  pod.turn = (pod.turn || 0) + 1;
+  if (pod.turn >= (settings.jumpEach || 1)) { pod.turn = 0; if (cap.queue.length > 1 && cap.queue.includes(a)) cap.athleteId = cap.queue[(cap.queue.indexOf(a) + 1) % cap.queue.length]; }
   settings.lastAthlete = cap.athleteId; saveSettings();
   say(`${podIn() ? (R.height / 0.0254).toFixed(1) + " inches" : (R.height * 100).toFixed(0) + " centimeters"}`);
   render();
@@ -2810,42 +2818,54 @@ function jumpInit() {
 }
 function jumpHTML() {
   jumpInit();
-  const P = sensor.pod, ready = sensor.connected && P && P.on && P.imu;
+  const P = sensor.pod, podOn = sensor.connected && P && P.on && P.imu;
+  const ph = pod.simPh != null ? pod.simPh : pod.busy ? 4 : podOn ? P.ph || 0 : -1;
   const a = cap.athleteId && athletes.find((x) => x.id === cap.athleteId), name = esc(a ? a.name : "");
   const today = jumps.filter((j) => dayKey(j.ts) === dayKey(Date.now()));
-  const last = today[0];
+  const shown = pod.show && jumps.find((j) => j.id === pod.show);
   const stage = (color, left, right, body, cls = "") => `<section class="stage short ${cls}"><div class="st-strip ${color}"><span>${left}</span><span>${right}</span></div><div class="st-body">${body}</div></section>`;
+  const upNow = (cue) => `<div class="st-label">Up now</div><div class="st-name">${name}</div><div class="st-ev">${cue}</div>`;
   let h = `<div class="between" style="margin-bottom:10px"><button class="btn sm" data-act="back">‹ Back</button><span class="small muted">Vertical jump</span></div>`;
-  if (pod.simming) h += stage("d-purple", "Jumping", name, `<div class="st-center"><div class="st-xl st-pulse">Simulated jump</div><div class="st-ev" style="margin-top:14px">Stand still · jump · stand still</div></div>`);
-  else if (!athletes.length) h += stage("d-amber", "No athletes", "", `<div class="st-ev" style="color:var(--text)">Add who's jumping first.</div>`);
-  else {
-    const strip = ready ? stage.bind(null, "d-green", "Ready", "Pod on") : stage.bind(null, "d-amber", WEB_COPY || !sensor.connected ? "No pod" : "Waiting for the pod", "");
-    h += strip(`<div class="st-label">Up now</div><div class="st-name">${name}</div><div class="st-ev">${ready ? "Stand still · jump · land and stand still" : "No pod connected. Try it with a simulated jump."}</div>`);
+  if (!athletes.length) h += stage("d-amber", "No athletes", "", `<div class="st-ev" style="color:var(--text)">Add who's jumping first.</div>`);
+  else if (shown) {
+    const who = esc(athleteById(shown.athleteId).name);
+    h += stage("d-blue", "Result", who, `<div class="st-label">Takeoff to peak${shown.sim ? " · simulated" : ""}</div><div class="st-big" style="color:var(--blue)">${fmtJump(shown.h)}<small>cm</small></div>
+      <div class="st-ev">${shown.hStand != null ? `Standing to peak <b style="color:var(--text)">${fmtJump(shown.hStand)} cm</b> · ` : ""}${fmtJumpAlt(shown.h)}</div>
+      <div class="small muted" style="margin-top:8px">A jump mat would read ${fmtJump(shown.hFlight)} cm (flight ${shown.t.toFixed(3)} s)${shown.agree ? "" : ": higher because of the lower landing, which doesn't change the numbers above"}${shown.cal ? "" : " · pod not calibrated"}</div>`);
+    h += `<div class="card between"><div><div class="small muted">Next up</div><b style="font-size:20px">${name}</b><div class="small muted">${podOn ? "Switches when they stand still with the pod on" : ""}</div></div><button class="btn primary" data-act="jump-next">Next ›</button></div>`;
+  } else if (ph === -1) h += stage("d-amber", WEB_COPY || !sensor.connected ? "No pod" : "Waiting for the pod", "", upNow("No pod connected. Try it with a simulated jump."));
+  else if (ph === 0) h += stage("d-green", "Ready", "Pod on", upNow(`<span class="st-cue">Stand still to start</span>`));
+  else if (ph === 1) h += stage("d-pink", "Set", name, `<div class="st-go"><div>Jump when</div><div class="pk">ready</div></div>`, "armed");
+  else if (ph === 2) h += stage("d-purple", "In the air", name, `<div class="st-center"><div class="st-xl st-pulse">In the air</div></div>`);
+  else if (ph === 3) h += stage("d-purple", "Landed", name, `<div class="st-center"><div class="st-xl">Stand still</div><div class="st-ev" style="margin-top:14px">The height shows up in a second.</div></div>`);
+  else h += stage("d-blue", "Jump done", name, `<div class="st-center"><div class="st-xl st-pulse">Working it out</div></div>`);
+  if (!podOn && athletes.length && pod.simPh == null) h += `<div class="card"><button class="btn${shown ? "" : " primary"}" style="width:100%" data-act="jump-sim">Simulate a jump · ${esc(firstName(cap.athleteId))}</button></div>`;
+  if (pod.lastRes && !pod.lastRes.ok && !shown && pod.simPh == null) h += `<div class="card"><b>${esc(pod.lastRes.why)}</b></div>`;
+  if (athletes.length) {
+    const n = settings.jumpEach || 1;
+    h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · hold &amp; drag to move</span></div>
+      <div class="between" style="margin:-4px 0 10px"><span class="small muted">Jumps each before the next one's up</span><div class="seg" style="width:150px">${[1, 2, 3].map((k) => `<button data-act="jump-each" data-v="${k}" aria-pressed="${k === n}">${k}</button>`).join("")}</div></div>${lineupHTML("run")}`;
   }
-  if (!ready && athletes.length) h += `<div class="card"><button class="btn primary" style="width:100%" data-act="jump-sim" ${pod.simming ? "disabled" : ""}>Simulate a jump · ${esc(firstName(cap.athleteId))}</button></div>`;
-  if (pod.lastRes && !pod.lastRes.ok && !pod.simming) h += `<div class="card"><b>${esc(pod.lastRes.why)}</b></div>`;
-  if (last) {
-    h += `<div class="card"><div class="between"><div class="label">Last jump · ${esc(athleteById(last.athleteId).name)}${last.sim ? " · simulated" : ""}</div></div><div class="jump-two"><div><div class="small muted">Takeoff to peak</div><div class="jump-big">${fmtJump(last.h)}<small>${jumpUnit()}</small></div><div class="small muted">${fmtJumpAlt(last.h)} · like a jump mat</div></div>${last.hStand != null ? `<div><div class="small muted">Standing to peak</div><div class="jump-big">${fmtJump(last.hStand)}<small>${jumpUnit()}</small></div><div class="small muted">${fmtJumpAlt(last.hStand)} · like Vertec</div></div>` : ""}</div>
-      <div class="small muted" style="margin-top:6px">A jump mat would read ${fmtJump(last.hFlight)} ${jumpUnit()} (flight time ${last.t.toFixed(3)} s)${last.agree ? "" : ": higher because you landed lower than takeoff. The numbers above don't depend on the landing."}${last.cal ? "" : " · pod not calibrated"}</div></div>`;
-  }
-  if (athletes.length) h += `<div class="lu-head"><div class="label">Lineup</div><span>Tap who's up · hold &amp; drag to move</span></div>${lineupHTML("run")}`;
   h += `<button class="lu-add" data-act="ath-new">+ Add athlete</button>`;
   if (today.length) {
     const best = {}; today.forEach((j) => { if (!best[j.athleteId] || j.h > best[j.athleteId]) best[j.athleteId] = j.h; });
-    h += `<div class="card" style="margin-top:14px"><div class="between"><div class="label">Today · ${today.length} jump${today.length === 1 ? "" : "s"}</div><span class="small muted">takeoff / standing</span></div>
-      <div class="list" style="margin-top:6px">${today.map((j) => `<div class="item"><div><b>${esc(athleteById(j.athleteId).name)}</b> <span class="small muted">${timeLabel(j.ts)}${j.sim ? " · sim" : ""}</span></div><div class="r"><b>${fmtJump(j.h)}</b>${j.hStand != null ? ` <span class="small muted">/ ${fmtJump(j.hStand)}</span>` : ""} ${jumpUnit()}${j.h === best[j.athleteId] ? ` <span class="pill ok">best</span>` : ""} <button class="btn sm ghost" data-act="jump-del" data-id="${j.id}" aria-label="Delete">✕</button></div></div>`).join("")}</div></div>`;
+    h += `<div class="card" style="margin-top:14px"><div class="between"><div class="label">Today · ${today.length} jump${today.length === 1 ? "" : "s"}</div><span class="small muted">takeoff / standing, cm</span></div>
+      <div class="list" style="margin-top:6px">${today.map((j) => `<div class="item"><div><b>${esc(athleteById(j.athleteId).name)}</b> <span class="small muted">${timeLabel(j.ts)}${j.sim ? " · sim" : ""}</span></div><div class="r"><b>${fmtJump(j.h)}</b>${j.hStand != null ? ` <span class="small muted">/ ${fmtJump(j.hStand)}</span>` : ""}${j.h === best[j.athleteId] ? ` <span class="pill ok">best</span>` : ""} <button class="btn sm ghost" data-act="jump-del" data-id="${j.id}" aria-label="Delete">✕</button></div></div>`).join("")}</div></div>`;
   }
   return h;
 }
 // no pod: a simulated jump through the same math (PodSim makes what the pod's chip would read)
 function jumpSim() {
-  if (pod.simming || !cap.athleteId) return;
-  pod.simming = true; render();
-  const hTrue = 0.3 + 0.35 * Math.random();
-  setTimeout(() => {
-    const { rec } = PodSim.simJump(hTrue);
-    pod.simming = false; podJump(rec, true);
-  }, 1600);
+  if (pod.simPh != null || !cap.athleteId) return;
+  pod.show = null;
+  const hTrue = 0.3 + 0.35 * Math.random(), steps = [[1, 1100], [2, 560], [3, 1000], [4, 500]];
+  let i = 0;
+  const next = () => {
+    if (i < steps.length) { pod.simPh = steps[i][0]; render(); setTimeout(next, steps[i++][1]); return; }
+    pod.simPh = null;
+    podJump(PodSim.simJump(hTrue).rec, true);
+  };
+  next();
 }
 
 // ---------------- views ----------------
@@ -3087,6 +3107,7 @@ function lineupDrop(order, n) {
 function lineupTap(id) {
   if (view === "jump") {
     if (!cap.queue.includes(id)) cap.queue.push(id);
+    if (cap.athleteId !== id) pod.turn = 0;
     cap.athleteId = id;
   } else if (cap.phase === "setup") {
     const i = cap.queue.indexOf(id); if (i >= 0) cap.queue.splice(i, 1); else cap.queue.push(id);
@@ -3517,6 +3538,8 @@ document.addEventListener("click", (e) => {
     case "pod-uncal": podCmd({ do: "uncal" }); break;
     case "pod-send": podCmd({ do: "send" }).then((j) => j && j.online && toast("Asked the pod for its last 14 s.")); break;
     case "jump-sim": jumpSim(); break;
+    case "jump-next": pod.show = null; pod.lastPh = null; render(); break;
+    case "jump-each": settings.jumpEach = +v; pod.turn = 0; saveSettings(); render(); break;
     case "jump-del": jumps = jumps.filter((j) => j.id !== id); saveJumps(); render(); break;
     case "lv-do": lvDo(v); break;
     case "lv-at": settings.lvAt = +v; saveSettings(); render(); break;
