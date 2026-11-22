@@ -2869,20 +2869,21 @@ function podStatusLine(P) {
 // Settings card
 function podCardHTML() {
   const unit = lvImperial() ? "in" : "cm", v = lvImperial() ? Math.round(podRest() / 0.0254) : Math.round(podRest() * 100);
-  const rest = `<div class="field" style="margin:0"><label for="podRest">Pod height lying on the mat (${unit})</label><input type="number" inputmode="decimal" id="podRest" data-unit="${unit}" data-min="${lvImperial() ? 10 : 25}" data-max="${lvImperial() ? 70 : 180}" data-def="${lvImperial() ? 39 : 100}" value="${v}"></div>`;
-  // this copy of the app can't reach the pods (they talk to the sensor): what works here, and where the rest lives
-  if (WEB_COPY) return `<div class="card"><div class="label">Waist pods</div>
-    <div class="small muted" style="margin:4px 0 10px">The pods talk to the sensor, so their status, calibration and updates are on the sensor's page (join the SpeedLidar Wi-Fi). The Jump test works here with simulated jumps.</div>
-    <div class="row" style="margin-bottom:10px"><button class="btn" data-act="go-jump">Jump test</button></div>${rest}</div>`;
+  // three separate things: the jump test (its own page), the vault's mat height (a setting), the pods themselves
+  const jumpRow = `<div class="card between"><div><b>Vertical jump test</b><div class="small muted">${WEB_COPY || !podsOn().length ? "Try it with simulated jumps" : "Jump height with the waist pods"}</div></div><button class="btn" data-act="go-jump">Open</button></div>`;
+  const rest = `<div class="card"><div class="label">Vault landing</div><div class="field" style="margin:8px 0 0"><label for="podRest">Pod height lying on the mat (${unit})</label><input type="number" inputmode="decimal" id="podRest" data-unit="${unit}" data-min="${lvImperial() ? 10 : 25}" data-max="${lvImperial() ? 70 : 180}" data-def="${lvImperial() ? 39 : 100}" value="${v}"></div>
+    <div class="small muted" style="margin-top:8px">For the vault's peak hip height only. Lie on the landing mat the way you land, pod on, and measure from the ground to the pod, once.</div></div>`;
+  // this copy of the app can't reach the pods (they talk to the sensor)
+  if (WEB_COPY) return jumpRow + rest + `<div class="card"><div class="small muted">The pods' status, calibration and updates are on the sensor's page (join the SpeedLidar Wi-Fi).</div></div>`;
   const list = podsAll();
-  let h = list.length ? list.map((P) => `<div class="card"><div class="between"><div class="label" style="display:flex;align-items:center;gap:8px">${podDot(P.id)}${podName(P.id)}</div>
+  let h = jumpRow;
+  h += list.length ? list.map((P) => `<div class="card"><div class="between"><div class="label" style="display:flex;align-items:center;gap:8px">${podDot(P.id)}${podName(P.id)}</div>
       <div class="pcolors">${Object.entries(POD_COLORS).map(([k, [nm, css]]) => `<button data-act="pod-color" data-id="${P.id}" data-v="${k}" aria-label="${nm}" aria-pressed="${podColor(P.id) === k}" style="background:${css}"></button>`).join("")}</div></div>
       <div class="small" style="margin:6px 0 10px">${podStatusLine(P)}</div>
       <div class="row"><button class="btn" data-act="go-podcal" data-id="${P.id}">Calibrate</button><button class="btn ghost" data-act="pod-send" data-id="${P.id}">Send a test recording</button></div></div>`).join("")
     : `<div class="card"><div class="small muted">${sensor.connected ? "No pod connected. Switch one on near the sensor (shake it to wake it)." : "Connect to the sensor to see the pods."}</div></div>`;
-  h += `<div class="card"><div class="row" style="margin-bottom:10px"><button class="btn" data-act="go-jump">Jump test</button></div>${rest}
-    <div class="small muted" style="margin:6px 0 10px">Lie on the landing mat the way you land, pod on, and measure from the ground to the pod. The vault's peak height is worked out from there, so measure it once carefully.</div>
-    <div class="small muted" style="margin-bottom:8px">Pod firmware: with internet, <a href="${POD_FW_URL}">download Pod.bin</a>; then on the SpeedLidar Wi-Fi, pick it here. The sensor hands it to every pod.</div>
+  h += rest;
+  h += `<div class="card"><div class="label">Pod firmware</div><div class="small muted" style="margin:6px 0 10px">With internet, <a href="${POD_FW_URL}">download Pod.bin</a>; then on the SpeedLidar Wi-Fi, pick it here. The sensor hands it to every pod.</div>
     <label class="btn" style="cursor:pointer">Update the pods<input type="file" id="podFwFile" accept=".bin,application/octet-stream" class="hidden"></label>
     ${pod.fwMsg ? `<div class="small" style="margin-top:8px">${esc(pod.fwMsg)}</div>` : ""}</div>`;
   return h;
