@@ -1,12 +1,12 @@
 const INK = "#1d1838", INK2 = "#5b5680", RULE = "#e3dff0", ACC = "#e0147a", ACC2 = "#7444e8", ACC3 = "#0f8fd6";
-const LOGO = `<svg class="mark" viewBox="11 32 79 44" aria-hidden="true"><rect x="13" y="34" width="54" height="8" rx="3" fill="#7444e8"/><rect x="13" y="44" width="54" height="22" rx="4" fill="currentColor"/><path d="M32 68 H48 L51 74 H29 Z" fill="#0f8fd6"/><g stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="M74 47 H88"/><path d="M74 55 H84"/><path d="M74 63 H88"/></g></svg>`;
+const LOGO = `<span class="mark" style="display:inline-flex;align-items:center;justify-content:center;color:#fff;background:linear-gradient(135deg,#ff2d8a,#8b5cf6 52%,#22b8ff);border-radius:5px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:13px;line-height:1;padding:3px 6px;width:auto;height:auto">LiDAR</span>`;
 function brandBlock(right) {
   return `<div class="between" style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid ${RULE}">
-    <div class="logo">${LOGO}<div><div class="name">PAYTON'S <b>LiDAR</b> SENSOR</div><div class="tagline">LASER SPEED · TF03 LiDAR · DESIGNED BY PAYTON PITTS</div></div></div>
+    <div class="logo">${LOGO}<div><div class="name">LiDAR SENSOR</div><div class="tagline">LASER SPEED · TF03 LiDAR · DESIGNED BY PAYTON PITTS</div></div></div>
     <div style="text-align:right;color:${INK2};font-size:12.5px;line-height:1.6">${right}</div></div>`;
 }
 function footer(page, pages) {
-  return `<div class="foot"><div class="logo" style="gap:8px">${LOGO.replace('class="mark"', 'class="mark" style="width:36px;height:20px"')}<div><b>PAYTON'S LiDAR SENSOR</b><div style="color:${INK2}">Tampa, FL</div></div></div>
+  return `<div class="foot"><div class="logo" style="gap:8px">${LOGO}<div><b>LiDAR SENSOR</b><div style="color:${INK2}">Tampa, FL</div></div></div>
     <div style="text-align:right"><b>Payton Pitts</b><div style="color:${INK2}">Designer · USF Track &amp; Field</div></div></div>
     <div class="fine"><span>LiDAR Sensor app · Benewake TF03 · 1000 readings per second</span><span>Page ${page} of ${pages}</span></div>`;
 }

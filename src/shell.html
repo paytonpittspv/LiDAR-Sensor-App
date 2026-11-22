@@ -51,7 +51,7 @@ html.ios-app{min-height:calc(100% + env(safe-area-inset-top,0px))}
 @media (min-width:720px){.top{padding-left:max(16px,calc((100% - 680px) / 2 + 16px));padding-right:max(16px,calc((100% - 680px) / 2 + 16px))}}
 .brand{font-family:var(--display);font-weight:800;font-size:clamp(15px,4.2vw,23px);letter-spacing:.4px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .top .pill{flex:none}
-.brand .hmark{width:2em;height:1.02em;vertical-align:-.16em;margin-right:.4em}
+.brand .lmark{display:inline-block;color:#fff;background:linear-gradient(135deg,#ff2d8a,#8b5cf6 52%,#22b8ff);border-radius:.24em;padding:.1em .32em .06em;margin-right:.3em;line-height:1;letter-spacing:.2px}
 .brand b{background:linear-gradient(90deg,var(--pink),var(--purple),var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
 .pill{font-size:12px;font-weight:600;padding:5px 10px;border-radius:999px;background:var(--card2);color:var(--muted);white-space:nowrap}
 .pill.ok{color:var(--good)}.pill.off{color:var(--bad)}
@@ -540,7 +540,7 @@ html.disp-on,html.disp-on body{overflow:hidden}
 </head>
 <body>
 <header class="top">
-  <div class="brand"><svg class="hmark" viewBox="0 0 80 41" aria-hidden="true"><rect x="0" y="0" width="54" height="8" rx="3" fill="#8b5cf6"/><rect x="0" y="10" width="54" height="22" rx="4" fill="#2a2636"/><rect x="19" y="34" width="16" height="6" rx="1" fill="#22b8ff"/><g stroke="#cfc8e6" stroke-width="4" stroke-linecap="round"><path d="M61 13H75"/><path d="M61 21H71"/><path d="M61 29H75"/></g></svg>PAYTON'S <b>LiDAR</b> SENSOR</div>
+  <div class="brand"><span class="lmark">LiDAR</span>SENSOR</div>
   <span id="conn" class="pill off">No sensor</span>
 </header>
 <button id="bumpbar" class="bumpbar" data-act="go-level" hidden></button>
