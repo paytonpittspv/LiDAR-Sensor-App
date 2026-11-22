@@ -2227,15 +2227,19 @@ function jumpAnalyticsHTML(mine) {
   h += `<div class="card"><div class="label" style="margin-bottom:6px">Personal records · Vertical jump</div><div class="list">
     ${bh ? `<div class="item"><div>Takeoff to peak<div class="small muted">${dayLabel(dayKey(bh.ts))}${bh.sim ? " · sim" : ""}</div></div><div class="r"><b>${cm(bh.h)} cm</b> <span class="small muted">${(bh.h / 0.0254).toFixed(1)} in</span></div></div>` : ""}
     ${bs ? `<div class="item"><div>Standing to peak<div class="small muted">${dayLabel(dayKey(bs.ts))}${bs.sim ? " · sim" : ""}</div></div><div class="r"><b>${cm(bs.hStand)} cm</b> <span class="small muted">${(bs.hStand / 0.0254).toFixed(1)} in</span></div></div>` : ""}
-    <div class="item"><div>Jumps</div><div class="r">${mine.length} over ${days.length} day${days.length === 1 ? "" : "s"}</div></div></div></div>`;
+    ${bh && bh.hFlight != null ? `<div class="item"><div>Jump mat would read<div class="small muted">same best jump, timed in the air like a jump mat</div></div><div class="r"><b>${cm(bh.hFlight)} cm</b> <span class="small muted">${bh.hFlight >= bh.h ? "+" : "−"}${cm(Math.abs(bh.hFlight - bh.h))}</span></div></div>` : ""}
+    <div class="item"><div>Jumps</div><div class="r">${mine.length} over ${days.length} day${days.length === 1 ? "" : "s"}</div></div></div>
+    <div class="small muted" style="margin-top:8px">A jump mat works the height out from time in the air, so it reads higher when you land with bent knees. The pod measures the rise itself.</div></div>`;
   // everyone's best, as bars
   const tops = athletes.map((a) => ({ a, j: jumps.filter((j) => j.athleteId === a.id).reduce((b, j) => (!b || j.h > b.h ? j : b), null) })).filter((x) => x.j).sort((x, y) => y.j.h - x.j.h);
   if (tops.length > 1) {
     const mx = tops[0].j.h;
     h += `<div class="card"><div class="label" style="margin-bottom:8px">Everyone's best · takeoff to peak</div>${tops.map(({ a, j }) => `<div class="jrank${a.id === anState.athleteId ? " me" : ""}" data-act="an-ath" data-id="${a.id}"><span class="nm">${esc(a.name)}</span><span class="bar"><b style="width:${((100 * j.h) / mx).toFixed(1)}%"></b></span><span class="v">${cm(j.h)}</span></div>`).join("")}</div>`;
   }
-  h += `<h2>Jumps</h2><div class="card list">${mine.slice(0, 60).map((j) => `<div class="item"><div><b>${dayLabel(dayKey(j.ts))}</b> <span class="small muted">${timeLabel(j.ts)}${j.sim ? " · sim" : ""}</span></div><div class="r"><b>${cm(j.h)}</b>${j.hStand != null ? ` <span class="small muted">/ ${cm(j.hStand)}</span>` : ""} cm <button class="btn sm ghost" data-act="jump-del" data-id="${j.id}" aria-label="Delete">✕</button></div></div>`).join("")}</div>
-    <div class="small muted" style="text-align:center">takeoff to peak / standing to peak</div>`;
+  h += `<h2>Jumps</h2><div class="card tw"><table><thead><tr><th>When</th><th>Takeoff</th><th>Standing</th><th>Jump mat</th><th></th></tr></thead><tbody>${mine.slice(0, 60).map((j) => `<tr>
+    <td style="white-space:nowrap"><b>${dayLabel(dayKey(j.ts))}</b><div class="small muted">${timeLabel(j.ts)}${j.sim ? " sim" : ""}</div></td><td><b>${cm(j.h)}</b></td><td>${j.hStand != null ? cm(j.hStand) : "–"}</td><td class="muted">${j.hFlight != null ? cm(j.hFlight) : "–"}</td>
+    <td style="width:1%"><button class="btn sm ghost" data-act="jump-del" data-id="${j.id}" aria-label="Delete">✕</button></td></tr>`).join("")}</tbody></table>
+    <div class="small muted" style="margin-top:8px">All in cm. Takeoff: takeoff to peak. Standing: standing to peak (like Vertec). Jump mat: what a jump mat would show.</div></div>`;
   return h;
 }
 
