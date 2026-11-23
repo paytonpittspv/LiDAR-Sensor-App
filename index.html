@@ -3064,7 +3064,9 @@ function pitSpot(x) {
 // ~30°, then level into the main pad; the side pads beside the runway are lower and dashed (not under the centre line)
 function pitSVG(sx, sz, mat) {
   mat = PIT.mainH;
-  const c = 0.06, cover = 0.1, hS = PIT.sideH, slope = Math.tan((30 * Math.PI) / 180), lip = 0.15;
+  // the centre front piece starts at the side pads' height (20") and ramps up to the main pad's (32"), reaching it
+  // just past the box (~18°), so its slope picks up right where the side pads' top ends
+  const c = 0.06, cover = 0.1, hS = PIT.sideH, lip = hS, slope = (mat - hS) / (0.3 - PIT.frontFrom);
   const pts = (arr) => arr.map(([x, z], i) => `${i ? "L" : "M"}${sx(x).toFixed(1)},${sz(z).toFixed(1)}`).join(" ") + " Z";
   const f0 = PIT.frontFrom, rampTop = f0 + (mat - lip) / slope, m0 = PIT.mainFrom, m1 = PIT.mainTo;
   // the whole centre line as one outline: ramp from the box collar, level top, back wall
