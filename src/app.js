@@ -1519,7 +1519,7 @@ function simPodPeak(run) {
 // spec drawing of one side of the double-front pit: the main pad runs 16'8" past the box and starts ~4' past it;
 // the front pieces fill from 2' before the box to the main pad (the box collar sits in them); the front pads either
 // side of the runway reach 7'6" back from the box (beside the runway, not under the centre line).
-const PIT = { mainFrom: 1.23, mainTo: 5.08, frontFrom: -0.62, padsFrom: -2.29 };
+const PIT = { mainFrom: 1.23, mainTo: 5.08, frontFrom: -0.62, padsFrom: -2.29, mainH: 32 * 0.0254, sideH: 20 * 0.0254 };   // main pad 32", front/side pads 20"
 function pitSpot(x) {
   if (x < PIT.frontFrom) return "short of the pit";
   if (x < PIT.mainFrom) return "on the front pieces, short of the main pad";
@@ -1533,7 +1533,8 @@ function pitSpot(x) {
 // slightly rounded corners, a dark body with a light top cover, the centre front piece ramping down to the box at
 // ~30°, then level into the main pad; the side pads beside the runway are lower and dashed (not under the centre line)
 function pitSVG(sx, sz, mat) {
-  const c = 0.06, cover = 0.1, hS = mat * 0.78, slope = Math.tan((30 * Math.PI) / 180), lip = 0.15;
+  mat = PIT.mainH;
+  const c = 0.06, cover = 0.1, hS = PIT.sideH, slope = Math.tan((30 * Math.PI) / 180), lip = 0.15;
   const pts = (arr) => arr.map(([x, z], i) => `${i ? "L" : "M"}${sx(x).toFixed(1)},${sz(z).toFixed(1)}`).join(" ") + " Z";
   const f0 = PIT.frontFrom, rampTop = f0 + (mat - lip) / slope, m0 = PIT.mainFrom, m1 = PIT.mainTo;
   // the whole centre line as one outline: ramp from the box collar, level top, back wall
@@ -1541,8 +1542,10 @@ function pitSVG(sx, sz, mat) {
   // the top cover: a band along the top, following the ramp
   const k = cover / Math.cos(Math.atan(slope));
   const coverP = pts([[f0, lip], [rampTop, mat], [m1 - c, mat], [m1, mat - c], [m1, mat - cover], [rampTop + (k - cover) / slope, mat - cover], [f0, lip - k]]);
-  const side = pts([[PIT.padsFrom, 0], [PIT.padsFrom, hS - c], [PIT.padsFrom + c, hS], [f0, hS], [f0, 0]]);
-  return `${`<path d="${side}" class="hp-side"/>`}
+  // the side pads (either side of the runway and the box, 20" tall): solid, drawn behind the centre line
+  const side = pts([[PIT.padsFrom, 0], [PIT.padsFrom, hS - c], [PIT.padsFrom + c, hS], [m0, hS], [m0, 0]]);
+  const sideCover = pts([[PIT.padsFrom, hS - cover], [PIT.padsFrom, hS - c], [PIT.padsFrom + c, hS], [m0, hS], [m0, hS - cover]]);
+  return `<path d="${side}" class="hp-sidep"/><path d="${sideCover}" class="hp-sidec"/>
     <path d="${body}" class="hp-body"/><path d="${coverP}" class="hp-cover"/>
     <line x1="${sx(m0)}" x2="${sx(m0)}" y1="${sz(mat - cover)}" y2="${sz(0)}" class="hp-edge"/>
     <line x1="${sx((m0 + m1) / 2)}" x2="${sx((m0 + m1) / 2)}" y1="${sz(mat - cover)}" y2="${sz(0)}" class="hp-edge"/>
@@ -1556,7 +1559,7 @@ function hipSVG(paths) {
   const sx = (x) => pl + ((x - xMin) / (xMax - xMin)) * (W - pl - pr), sz = (z) => H - pb - (z / zMax) * (H - pb - pt);
   const pts = (P, a, b) => P.x.slice(a, b + 1).map((x, k) => `${sx(x).toFixed(1)},${sz(P.z[a + k]).toFixed(1)}`).join(" ");
   const from = (P) => Math.max(0, P.x.findIndex((x) => x > xMin));
-  const mat = Math.max(0.3, podRest() - 0.15);
+  const mat = PIT.mainH;
   let g = "";
   // along the runway in feet (every 5', labelled every 10'), heights in metres
   for (let f = Math.ceil(xMin / FT / 5) * 5; f * FT <= xMax; f += 5) g += `<line x1="${sx(f * FT)}" x2="${sx(f * FT)}" y1="${pt}" y2="${H - pb}" class="hp-grid"/>${f % 10 === 0 ? `<text x="${sx(f * FT)}" y="${H - 6}" class="hp-t" text-anchor="middle">${f === 0 ? "box" : `${f}'`}</text>` : ""}`;
