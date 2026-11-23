@@ -669,6 +669,20 @@ function drawDisplay() {
       body = `<div class="d-label">UP NOW</div><div class="d-name">${E(j.jWho || "\u2013")}</div>
         <div class="d-ev">Vertical jump${j.jBest ? ` \u00b7 best today ${E(j.jBest)} cm` : ""}</div><div class="d-cue">Stand still \u00b7 jump \u00b7 stand still</div>`;
     }
+  } else if (j.s === "level") {
+    // the digital level (the controller has Level & aim open): bubble, nose angle, where the beam ends up
+    if (!j.lvOk) { st = strip("d-amber", "LEVEL"); body = `<div class="d-center"><div class="d-xl d-ambert">NO TILT SENSOR</div><div class="d-sub">Check the BMI160\u2019s four wires.</div></div>`; }
+    else {
+      const p = j.lvP || 0, ap = Math.abs(p), col = ap < 0.1 ? "green" : ap < 0.4 ? "amber" : "red", cssCol = { green: "#1fd17b", amber: "#ffb020", red: "#ff4d4d" }[col];
+      let bx = (j.lvR || 0) * 22, by = -p * 22; const L = Math.hypot(bx, by), lim = 37; if (L > lim) { bx *= lim / L; by *= lim / L; }
+      const off = (j.lvAt || 30.48) * Math.tan((p * Math.PI) / 180) * 100, at = j.vault ? `${((j.lvAt || 30.48) * 3.28084).toFixed(0)} FT` : `${(j.lvAt || 30.48).toFixed(0)} M`;
+      st = strip(col === "green" ? "d-green" : col === "amber" ? "d-amber" : "d-red", ap < 0.1 ? "LEVEL \u00b7 GOOD" : "LEVEL", "");
+      body = `<div class="d-level"><svg viewBox="-50 -50 100 100" class="d-bub"><circle r="46" class="lb-ring"/><circle r="6.5" class="lb-ring"/><line x1="-42" x2="42" class="lb-ring"/><line y1="-42" y2="42" class="lb-ring"/><circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="8" fill="${cssCol}"/></svg>
+        <div class="d-lread"><div class="d-label">NOSE</div><div class="d-num" style="color:${cssCol}">${ap < 0.005 ? "0.00" : (p > 0 ? "+" : "\u2212") + ap.toFixed(2)}<small>\u00b0</small></div>
+          <div class="d-lword" style="color:${cssCol}">${ap < 0.1 ? "LEVEL" : p > 0 ? "NOSE UP" : "NOSE DOWN"}</div>
+          <div class="d-label" style="margin-top:2vh">BEAM AT ${at}</div><div class="d-cell">${Math.abs(off) < 1 ? "on height" : `${Math.abs(off).toFixed(0)} cm ${off > 0 ? "high" : "low"}`}</div>
+          <div class="d-sub" style="text-align:left">${j.lvZ ? "Tilt the tripod head until it\u2019s green" : "Not zeroed yet: zero it on the controller"}</div></div></div>`;
+    }
   } else if (j.s === "nolidar") {
     st = strip("d-amber", "NO LIDAR");
     body = `<div class="d-center"><div class="d-xl d-ambert">NO SIGNAL</div><div class="d-sub">The LiDAR isn\u2019t sending anything. Check its cable and the power bank.</div></div>`;
