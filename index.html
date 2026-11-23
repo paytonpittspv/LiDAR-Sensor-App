@@ -564,6 +564,7 @@ html.disp-on,html.disp-on body{overflow:hidden}
 .hp-ghost{fill:none;stroke:var(--muted);stroke-width:1.6;opacity:.45;stroke-linejoin:round}
 .hpkey{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.hpkey button{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:6px 10px;font:inherit;font-size:13px;cursor:pointer}
 .hpkey button[aria-pressed="false"]{opacity:.4}.hpkey i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.hp-front{fill:color-mix(in srgb,var(--blue) 14%,transparent);stroke:color-mix(in srgb,var(--blue) 40%,transparent)}.hp-side{fill:none;stroke:color-mix(in srgb,var(--blue) 40%,transparent);stroke-dasharray:4 4}
 .hp-dot{fill:var(--bg);stroke:var(--text);stroke-width:2}.hp-pk{fill:var(--pink);stroke:var(--bg);stroke-width:2}.hp-l{font-size:12px;fill:var(--muted);font-family:var(--ui);font-weight:600}.hp-big{font-size:15px;fill:var(--text);font-weight:800}
 .jump-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}.jump-two .jump-big{font-size:clamp(34px,11vw,52px)}
 .jump-big{font-family:var(--display);font-weight:800;font-size:64px;line-height:1;margin:4px 0}
@@ -3039,11 +3040,29 @@ function simPodPeak(run) {
     if (P.ok && run.res.pod.peak) { run.res.pod.path = pathKeep(P); run.res.pod.peak = P.peak.z; }
   } catch (e) {}
 }
+// The landing pit along the runway's centre line, in metres from the box's back wall (the stop board), from the
+// spec drawing of one side of the double-front pit: the main pad runs 16'8" past the box and starts ~4' past it;
+// the front pieces fill from 2' before the box to the main pad (the box collar sits in them); the front pads either
+// side of the runway reach 7'6" back from the box (beside the runway, not under the centre line).
+const PIT = { mainFrom: 1.23, mainTo: 5.08, frontFrom: -0.62, padsFrom: -2.29 };
+function pitSpot(x) {
+  if (x < PIT.frontFrom) return "short of the pit";
+  if (x < PIT.mainFrom) return "on the front pieces, short of the main pad";
+  if (x > PIT.mainTo) return "off the back of the pit";
+  const d = x - PIT.mainFrom, L = PIT.mainTo - PIT.mainFrom;
+  return d < L / 3 ? "in the front third of the main pad" : d < (2 * L) / 3 ? "in the middle of the main pad" : "in the back third of the main pad";
+}
 // the hip path, side on: run-up (LiDAR + pod), takeoff, up the pole, over, down to the mat. Box at 0.
 // paths: [{ P, main }]: the main one is drawn in colour with its markers, the others thin behind it
+function pitSVG(sx, sz, mat) {
+  const r = (x0, x1, cls) => `<rect x="${sx(x0)}" y="${sz(mat)}" width="${sx(x1) - sx(x0)}" height="${sz(0) - sz(mat)}" rx="3" class="${cls}"/>`;
+  return `<rect x="${sx(PIT.padsFrom)}" y="${sz(mat)}" width="${sx(PIT.frontFrom) - sx(PIT.padsFrom)}" height="${sz(0) - sz(mat)}" rx="3" class="hp-side"/>`
+    + r(PIT.frontFrom, PIT.mainFrom, "hp-front") + r(PIT.mainFrom, PIT.mainTo, "hp-mat")
+    + `<text x="${(sx(PIT.mainFrom) + sx(PIT.mainTo)) / 2}" y="${(sz(mat) + sz(0)) / 2 + 4}" class="hp-t" text-anchor="middle">main pad</text>`;
+}
 function hipSVG(paths) {
   const all = paths.map((p) => p.P), main = (paths.find((p) => p.main) || paths[0]).P;
-  const xMin = -6.5, xMax = Math.max(4, ...all.map((P) => Math.max(...P.x) + 0.6)), zMax = Math.max(5, ...all.map((P) => P.peak.z + 0.6));
+  const xMin = -6.5, xMax = Math.max(PIT.mainTo + 0.4, ...all.map((P) => Math.max(...P.x) + 0.6)), zMax = Math.max(5, ...all.map((P) => P.peak.z + 0.6));
   const W = 640, H = Math.round(W * (zMax / (xMax - xMin))), pl = 26, pb = 22, pt = 10, pr = 10;
   const sx = (x) => pl + ((x - xMin) / (xMax - xMin)) * (W - pl - pr), sz = (z) => H - pb - (z / zMax) * (H - pb - pt);
   const pts = (P, a, b) => P.x.slice(a, b + 1).map((x, k) => `${sx(x).toFixed(1)},${sz(P.z[a + k]).toFixed(1)}`).join(" ");
@@ -3059,14 +3078,14 @@ function hipSVG(paths) {
     const lines = paths.map(({ P, color }) => `<polyline points="${pts(P, from(P), P.jTO)}" class="hp-run" style="stroke:${color};opacity:.45;stroke-width:2"/><polyline points="${pts(P, P.jTO, P.x.length - 1)}" class="hp-air" style="stroke:${color};stroke-width:3"/>
       <circle cx="${sx(P.peak.x)}" cy="${sz(P.peak.z)}" r="5" style="fill:${color};stroke:var(--bg);stroke-width:2"/>`).join("");
     return `<svg viewBox="0 0 ${W} ${H}" class="hp" role="img" aria-label="Hip paths, layered">${g}<line x1="${pl}" x2="${W - pr}" y1="${sz(0)}" y2="${sz(0)}" class="hp-ground"/>
-      <rect x="${sx(0.3)}" y="${sz(mat)}" width="${sx(xMax) - sx(0.3)}" height="${sz(0) - sz(mat)}" rx="4" class="hp-mat"/>
-      <path d="M${sx(-0.55)},${sz(0)} L${sx(0)},${sz(-0.01) + 6} L${sx(0)},${sz(0)}" class="hp-box"/>${lines}</svg>`;
+      ${pitSVG(sx, sz, mat)}
+      <path d="M${sx(-1.0)},${sz(0)} L${sx(0)},${sz(0) + 9} L${sx(0)},${sz(0)} Z" class="hp-box"/>${lines}</svg>`;
   }
   return `<svg viewBox="0 0 ${W} ${H}" class="hp" role="img" aria-label="Hip path through the vault">
     <defs><linearGradient id="hpG" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="var(--pink)"/><stop offset=".55" stop-color="var(--purple)"/><stop offset="1" stop-color="var(--blue)"/></linearGradient></defs>
     ${g}<line x1="${pl}" x2="${W - pr}" y1="${sz(0)}" y2="${sz(0)}" class="hp-ground"/>
-    <rect x="${sx(0.3)}" y="${sz(mat)}" width="${sx(xMax) - sx(0.3)}" height="${sz(0) - sz(mat)}" rx="4" class="hp-mat"/>
-    <path d="M${sx(-0.55)},${sz(0)} L${sx(0)},${sz(-0.01) + 6} L${sx(0)},${sz(0)}" class="hp-box"/>
+    ${pitSVG(sx, sz, mat)}
+    <path d="M${sx(-1.0)},${sz(0)} L${sx(0)},${sz(0) + 9} L${sx(0)},${sz(0)} Z" class="hp-box"/>
     ${ghosts}
     <polyline points="${pts(main, from(main), to)}" class="hp-run"/><polyline points="${pts(main, to, n - 1)}" class="hp-air" stroke="url(#hpG)"/>
     <circle cx="${sx(main.x[to])}" cy="${sz(main.z[to])}" r="5" class="hp-dot"/><text x="${sx(main.x[to])}" y="${sz(main.z[to]) + 20}" class="hp-l" text-anchor="middle">takeoff</text>
@@ -3076,7 +3095,7 @@ function hipSVG(paths) {
 function hipPathHTML(P, sim) {
   const past = P.peak.x, toX = P.x[P.jTO];
   return `<div class="card" style="grid-column:1/-1"><div class="between"><div class="label">Hip path${sim ? " · simulated" : ""}</div><span class="small muted">metres · box at 0</span></div>${hipSVG([{ P, main: true }])}
-    <div class="small muted" style="margin-top:6px">Highest at <b style="color:var(--text)">${P.peak.z.toFixed(2)} m</b>, ${Math.abs(past).toFixed(2)} m ${past >= 0 ? "past" : "before"} the box · takeoff ${Math.abs(toX).toFixed(2)} m out. Grey: the run-up (LiDAR), colour: off the ground (waist pod).</div></div>`;
+    <div class="small muted" style="margin-top:6px">Highest at <b style="color:var(--text)">${P.peak.z.toFixed(2)} m</b>, ${Math.abs(past).toFixed(2)} m ${past >= 0 ? "past" : "before"} the box · takeoff ${Math.abs(toX).toFixed(2)} m out · landed ${P.x[P.x.length - 1].toFixed(2)} m past the box, <b style="color:var(--text)">${pitSpot(P.x[P.x.length - 1])}</b>. Grey: the run-up (LiDAR), colour: off the ground (waist pod).</div></div>`;
 }
 // Sessions: the day's vaults with a pod, layered on top of each other, one colour each (tap to hide or show)
 const HP_COLS = ["var(--pink)", "var(--purple)", "var(--blue)", "#e08a00", "#16a34a", "#0f766e", "#db2777", "#4f46e5"];
