@@ -1529,33 +1529,25 @@ function pitSpot(x) {
 }
 // the hip path, side on: run-up (LiDAR + pod), takeoff, up the pole, over, down to the mat. Box at 0.
 // paths: [{ P, main }]: the main one is drawn in colour with its markers, the others thin behind it
-// the pit, side on along the runway's centre line: foam pads with rounded edges and a slight crown, the top pad as a
-// separate layer, seams where the sections meet, a base frame, the front pieces (a little lower, sloping down to the
-// box collar), the side pads beside the runway (dashed: not under the centre line) and the standards, faint
+// the pit, side on along the runway's centre line (after the Richey double-front pit): straight vertical walls with
+// slightly rounded corners, a dark body with a light top cover, the centre front piece ramping down to the box at
+// ~30°, then level into the main pad; the side pads beside the runway are lower and dashed (not under the centre line)
 function pitSVG(sx, sz, mat) {
-  const rr = 0.18, top = 0.13, base = 0.06, hF = mat * 0.88, mid = (PIT.mainFrom + PIT.mainTo) / 2;
-  // a foam cushion: rounded top corners, a crowned top
-  const cushion = (x0, x1, h, crown, fill, cls = "hp-pad") => {
-    const m = (x0 + x1) / 2;
-    return `<path d="M${sx(x0)},${sz(base)} L${sx(x0)},${sz(h - rr)} Q${sx(x0)},${sz(h)} ${sx(x0 + rr)},${sz(h + crown * 0.4)} Q${sx(m)},${sz(h + crown)} ${sx(x1 - rr)},${sz(h + crown * 0.4)} Q${sx(x1)},${sz(h)} ${sx(x1)},${sz(h - rr)} L${sx(x1)},${sz(base)} Z" class="${cls}" fill="${fill}"/>`;
-  };
-  // the top pad: one long slab over both sections, slightly overhanging, crowned
-  const slab = (x0, x1, h) => {
-    const m = (x0 + x1) / 2, c = 0.07, r = 0.1;
-    return `<path d="M${sx(x0)},${sz(h - top)} L${sx(x0)},${sz(h - r)} Q${sx(x0)},${sz(h + 0.01)} ${sx(x0 + r * 1.6)},${sz(h + c * 0.5)} Q${sx(m)},${sz(h + c)} ${sx(x1 - r * 1.6)},${sz(h + c * 0.5)} Q${sx(x1)},${sz(h + 0.01)} ${sx(x1)},${sz(h - r)} L${sx(x1)},${sz(h - top)} Z" class="hp-top"/>`;
-  };
-  // front piece: rises from the box collar in a curve, then flat to the main pad
-  const f0 = PIT.frontFrom, f1 = PIT.mainFrom;
-  const fp = `<path d="M${sx(f0)},${sz(base)} L${sx(f0)},${sz(0.18)} C${sx(f0 + 0.05)},${sz(hF * 0.75)} ${sx(f0 + 0.25)},${sz(hF + 0.02)} ${sx(f0 + 0.6)},${sz(hF + 0.02)} L${sx(f1 - 0.12)},${sz(hF + 0.01)} Q${sx(f1)},${sz(hF)} ${sx(f1)},${sz(hF - 0.12)} L${sx(f1)},${sz(base)} Z" class="hp-pad" fill="url(#pitF)"/>`;
-  return `<defs><linearGradient id="pitM" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--blue)" stop-opacity=".40"/><stop offset="1" stop-color="var(--purple)" stop-opacity=".22"/></linearGradient>
-      <linearGradient id="pitF" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--blue)" stop-opacity=".26"/><stop offset="1" stop-color="var(--purple)" stop-opacity=".14"/></linearGradient></defs>
-    <path d="M${sx(PIT.padsFrom)},${sz(base)} L${sx(PIT.padsFrom)},${sz(hF - 0.15)} Q${sx(PIT.padsFrom)},${sz(hF)} ${sx(PIT.padsFrom + 0.2)},${sz(hF)} L${sx(f0 - 0.05)},${sz(hF)}" class="hp-side"/>
-    <text x="${(sx(PIT.padsFrom) + sx(f0)) / 2}" y="${sz(hF) - 6}" class="hp-t" text-anchor="middle">side pads</text>
-    <rect x="${sx(PIT.padsFrom)}" y="${sz(base)}" width="${sx(PIT.mainTo) - sx(PIT.padsFrom)}" height="${sz(0) - sz(base)}" rx="2" class="hp-base"/>
-    ${fp}
-    ${cushion(PIT.mainFrom, mid, mat - top + 0.02, 0.05, "url(#pitM)")}${cushion(mid, PIT.mainTo, mat - top + 0.02, 0.05, "url(#pitM)")}
-    ${slab(PIT.mainFrom - 0.03, PIT.mainTo + 0.03, mat)}
-    <text x="${sx(mid)}" y="${(sz(mat - top) + sz(base)) / 2 + 4}" class="hp-t hp-pt" text-anchor="middle">main pad</text>`;
+  const c = 0.06, cover = 0.1, hS = mat * 0.78, slope = Math.tan((30 * Math.PI) / 180), lip = 0.15;
+  const pts = (arr) => arr.map(([x, z], i) => `${i ? "L" : "M"}${sx(x).toFixed(1)},${sz(z).toFixed(1)}`).join(" ") + " Z";
+  const f0 = PIT.frontFrom, rampTop = f0 + (mat - lip) / slope, m0 = PIT.mainFrom, m1 = PIT.mainTo;
+  // the whole centre line as one outline: ramp from the box collar, level top, back wall
+  const body = pts([[f0, 0], [f0, lip], [rampTop, mat], [m1 - c, mat], [m1, mat - c], [m1, 0]]);
+  // the top cover: a band along the top, following the ramp
+  const k = cover / Math.cos(Math.atan(slope));
+  const coverP = pts([[f0, lip], [rampTop, mat], [m1 - c, mat], [m1, mat - c], [m1, mat - cover], [rampTop + (k - cover) / slope, mat - cover], [f0, lip - k]]);
+  const side = pts([[PIT.padsFrom, 0], [PIT.padsFrom, hS - c], [PIT.padsFrom + c, hS], [f0, hS], [f0, 0]]);
+  return `${`<path d="${side}" class="hp-side"/>`}
+    <path d="${body}" class="hp-body"/><path d="${coverP}" class="hp-cover"/>
+    <line x1="${sx(m0)}" x2="${sx(m0)}" y1="${sz(mat - cover)}" y2="${sz(0)}" class="hp-edge"/>
+    <line x1="${sx((m0 + m1) / 2)}" x2="${sx((m0 + m1) / 2)}" y1="${sz(mat - cover)}" y2="${sz(0)}" class="hp-edge"/>
+    <text x="${(sx(m0) + sx(m1)) / 2}" y="${(sz(mat - cover) + sz(0)) / 2 + 4}" class="hp-t hp-pt" text-anchor="middle">main pad</text>
+    <text x="${(sx(PIT.padsFrom) + sx(f0)) / 2}" y="${sz(hS) - 6}" class="hp-t" text-anchor="middle">side pads</text>`;
 }
 function hipSVG(paths) {
   const all = paths.map((p) => p.P), main = (paths.find((p) => p.main) || paths[0]).P;
