@@ -1516,29 +1516,93 @@ function simPodPeak(run) {
   } catch (e) {}
 }
 // the hip path, side on: run-up (LiDAR + pod), takeoff, up the pole, over, down to the mat. Box at 0.
-function hipPathHTML(P, sim) {
-  const xs = P.x, zs = P.z, n = xs.length, j0 = Math.max(0, xs.findIndex((x) => x > -6.5));
-  const xMin = -6.5, xMax = Math.max(4, Math.max(...xs.slice(j0)) + 0.6), zMax = Math.max(5, P.peak.z + 0.6);
-  const W = 640, H = Math.round(W * (zMax / (xMax - xMin)) * 1.0), pl = 26, pb = 22, pt = 10, pr = 10;
+// paths: [{ P, main }]: the main one is drawn in colour with its markers, the others thin behind it
+function hipSVG(paths) {
+  const all = paths.map((p) => p.P), main = (paths.find((p) => p.main) || paths[0]).P;
+  const xMin = -6.5, xMax = Math.max(4, ...all.map((P) => Math.max(...P.x) + 0.6)), zMax = Math.max(5, ...all.map((P) => P.peak.z + 0.6));
+  const W = 640, H = Math.round(W * (zMax / (xMax - xMin))), pl = 26, pb = 22, pt = 10, pr = 10;
   const sx = (x) => pl + ((x - xMin) / (xMax - xMin)) * (W - pl - pr), sz = (z) => H - pb - (z / zMax) * (H - pb - pt);
-  const seg = (a, b) => xs.slice(a, b + 1).map((x, k) => `${sx(x).toFixed(1)},${sz(zs[a + k]).toFixed(1)}`).join(" ");
+  const pts = (P, a, b) => P.x.slice(a, b + 1).map((x, k) => `${sx(x).toFixed(1)},${sz(P.z[a + k]).toFixed(1)}`).join(" ");
+  const from = (P) => Math.max(0, P.x.findIndex((x) => x > xMin));
   const mat = Math.max(0.3, podRest() - 0.15);
   let g = "";
   for (let x = Math.ceil(xMin); x <= xMax; x++) g += `<line x1="${sx(x)}" x2="${sx(x)}" y1="${pt}" y2="${H - pb}" class="hp-grid"/>${x % 2 === 0 ? `<text x="${sx(x)}" y="${H - 6}" class="hp-t" text-anchor="middle">${x === 0 ? "box" : x + " m"}</text>` : ""}`;
   for (let z = 1; z < zMax; z++) g += `<line x1="${pl}" x2="${W - pr}" y1="${sz(z)}" y2="${sz(z)}" class="hp-grid"/><text x="${pl - 4}" y="${sz(z) + 4}" class="hp-t" text-anchor="end">${z}</text>`;
-  const pk = P.jPeak, to = P.jTO;
-  const svg = `<svg viewBox="0 0 ${W} ${H}" class="hp" role="img" aria-label="Hip path through the vault">
+  const ghosts = paths.filter((p) => p.P !== main).map(({ P }) => `<polyline points="${pts(P, from(P), P.x.length - 1)}" class="hp-ghost"/>`).join("");
+  const to = main.jTO, n = main.x.length;
+  // layered: every path in its own colour, each peak marked (a session's jumps on top of each other)
+  if (paths.some((p) => p.color)) {
+    const lines = paths.map(({ P, color }) => `<polyline points="${pts(P, from(P), P.jTO)}" class="hp-run" style="stroke:${color};opacity:.45;stroke-width:2"/><polyline points="${pts(P, P.jTO, P.x.length - 1)}" class="hp-air" style="stroke:${color};stroke-width:3"/>
+      <circle cx="${sx(P.peak.x)}" cy="${sz(P.peak.z)}" r="5" style="fill:${color};stroke:var(--bg);stroke-width:2"/>`).join("");
+    return `<svg viewBox="0 0 ${W} ${H}" class="hp" role="img" aria-label="Hip paths, layered">${g}<line x1="${pl}" x2="${W - pr}" y1="${sz(0)}" y2="${sz(0)}" class="hp-ground"/>
+      <rect x="${sx(0.3)}" y="${sz(mat)}" width="${sx(xMax) - sx(0.3)}" height="${sz(0) - sz(mat)}" rx="4" class="hp-mat"/>
+      <path d="M${sx(-0.55)},${sz(0)} L${sx(0)},${sz(-0.01) + 6} L${sx(0)},${sz(0)}" class="hp-box"/>${lines}</svg>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" class="hp" role="img" aria-label="Hip path through the vault">
     <defs><linearGradient id="hpG" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="var(--pink)"/><stop offset=".55" stop-color="var(--purple)"/><stop offset="1" stop-color="var(--blue)"/></linearGradient></defs>
     ${g}<line x1="${pl}" x2="${W - pr}" y1="${sz(0)}" y2="${sz(0)}" class="hp-ground"/>
     <rect x="${sx(0.3)}" y="${sz(mat)}" width="${sx(xMax) - sx(0.3)}" height="${sz(0) - sz(mat)}" rx="4" class="hp-mat"/>
     <path d="M${sx(-0.55)},${sz(0)} L${sx(0)},${sz(-0.01) + 6} L${sx(0)},${sz(0)}" class="hp-box"/>
-    <polyline points="${seg(j0, to)}" class="hp-run"/><polyline points="${seg(to, n - 1)}" class="hp-air" stroke="url(#hpG)"/>
-    <circle cx="${sx(xs[to])}" cy="${sz(zs[to])}" r="5" class="hp-dot"/><text x="${sx(xs[to])}" y="${sz(zs[to]) + 20}" class="hp-l" text-anchor="middle">takeoff</text>
-    <circle cx="${sx(P.peak.x)}" cy="${sz(P.peak.z)}" r="6" class="hp-pk"/><text x="${sx(P.peak.x)}" y="${sz(P.peak.z) - 12}" class="hp-l hp-big" text-anchor="middle">${P.peak.z.toFixed(2)} m</text>
+    ${ghosts}
+    <polyline points="${pts(main, from(main), to)}" class="hp-run"/><polyline points="${pts(main, to, n - 1)}" class="hp-air" stroke="url(#hpG)"/>
+    <circle cx="${sx(main.x[to])}" cy="${sz(main.z[to])}" r="5" class="hp-dot"/><text x="${sx(main.x[to])}" y="${sz(main.z[to]) + 20}" class="hp-l" text-anchor="middle">takeoff</text>
+    <circle cx="${sx(main.peak.x)}" cy="${sz(main.peak.z)}" r="6" class="hp-pk"/><text x="${sx(main.peak.x)}" y="${sz(main.peak.z) - 12}" class="hp-l hp-big" text-anchor="middle">${main.peak.z.toFixed(2)} m</text>
   </svg>`;
-  const past = P.peak.x, toX = xs[to];
-  return `<div class="card" style="grid-column:1/-1"><div class="between"><div class="label">Hip path${sim ? " · simulated" : ""}</div><span class="small muted">metres · box at 0</span></div>${svg}
+}
+function hipPathHTML(P, sim) {
+  const past = P.peak.x, toX = P.x[P.jTO];
+  return `<div class="card" style="grid-column:1/-1"><div class="between"><div class="label">Hip path${sim ? " · simulated" : ""}</div><span class="small muted">metres · box at 0</span></div>${hipSVG([{ P, main: true }])}
     <div class="small muted" style="margin-top:6px">Highest at <b style="color:var(--text)">${P.peak.z.toFixed(2)} m</b>, ${Math.abs(past).toFixed(2)} m ${past >= 0 ? "past" : "before"} the box · takeoff ${Math.abs(toX).toFixed(2)} m out. Grey: the run-up (LiDAR), colour: off the ground (waist pod).</div></div>`;
+}
+// Sessions: the day's vaults with a pod, layered on top of each other, one colour each (tap to hide or show)
+const HP_COLS = ["var(--pink)", "var(--purple)", "var(--blue)", "#e08a00", "#16a34a", "#0f766e", "#db2777", "#4f46e5"];
+function sessionHipCard(list) {
+  const wp = list.filter((r) => r.mode === "vault" && r.res.pod && r.res.pod.path).sort((p, q) => p.ts - q.ts);
+  if (!wp.length) return "";
+  const off = anState.hipOff || (anState.hipOff = {});
+  const names = new Set(wp.map((r) => r.athleteId)).size > 1, both = new Set(wp.map((r) => r.setup)).size > 1;
+  const fn = (id) => { const f = firstName(id), dup = wp.some((r) => r.athleteId !== id && firstName(r.athleteId) === f); return dup ? athleteById(id).name : f; };
+  const shown = wp.map((r, i) => ({ r, color: HP_COLS[i % HP_COLS.length] })).filter(({ r }) => !off[r.id]);
+  const best = wp.reduce((b, r) => (r.res.pod.path.peak.z > b.res.pod.path.peak.z ? r : b));
+  return `<div class="card"><div class="between"><b style="font-size:17px">Hip paths</b><span class="small muted">${wp.length} vault${wp.length > 1 ? "s" : ""} with a pod · metres</span></div>
+    ${shown.length ? hipSVG(shown.map(({ r, color }) => ({ P: r.res.pod.path, color }))) : `<div class="small muted" style="margin:10px 0">Tap a vault below to show it.</div>`}
+    <div class="hpkey">${wp.map((r, i) => `<button data-act="hip-toggle" data-id="${r.id}" aria-pressed="${!off[r.id]}"><i style="background:${HP_COLS[i % HP_COLS.length]}"></i>${names ? esc(fn(r.athleteId)) + " · " : ""}#${i + 1}${both ? ` · ${/150$/.test(r.setup) ? "long" : "short"}` : ""} <b>${r.res.pod.path.peak.z.toFixed(2)} m</b>${r === best ? " ★" : ""}</button>`).join("")}</div>
+    <div class="small muted" style="margin-top:6px">In order of the day. ★ highest. Tap to hide or show one.</div></div>`;
+}
+// Analytics · vault (long and short approach): the hip paths of this test, the best one over the latest few,
+// peak height per day, and what goes with a high peak
+function vaultHipCard(tr) {
+  const wp = tr.filter((r) => r.res.pod && r.res.pod.path).sort((p, q) => q.ts - p.ts);
+  if (!wp.length) return `<div class="card"><div class="label">Hip path</div><div class="small muted" style="margin-top:6px">Wear a waist pod on these runs to see your hip path through the vault and your peak height here.</div></div>`;
+  const best = wp.reduce((b, r) => (r.res.pod.path.peak.z > b.res.pod.path.peak.z ? r : b));
+  const pick = anState.hipRun && wp.find((r) => r.id === anState.hipRun) || best;
+  const ghosts = wp.filter((r) => r !== pick).slice(0, 4);
+  const svg = hipSVG([{ P: pick.res.pod.path, main: true }, ...ghosts.map((r) => ({ P: r.res.pod.path }))]);
+  const pk = (r) => r.res.pod.path.peak, avg = (f) => wp.reduce((s, r) => s + f(r), 0) / wp.length;
+  const aZ = avg((r) => pk(r).z), aX = avg((r) => pk(r).x), aTO = avg((r) => -r.res.pod.path.x[r.res.pod.path.jTO]);
+  // peak height per day
+  const bd = {}; for (const r of wp) { const k = dayKey(r.ts); if (!bd[k] || pk(r).z > bd[k]) bd[k] = pk(r).z; }
+  const ks = Object.keys(bd).sort(); let ch = "";
+  if (ks.length > 1) {
+    const t0 = new Date(ks[0]).getTime(), X = ks.map((d) => (new Date(d).getTime() - t0) / 864e5), Y = ks.map((d) => bd[d]), lo = Math.min(...Y), hi = Math.max(...Y), pd = Math.max(0.05, (hi - lo) * 0.25);
+    ch = `<div class="label" style="margin-top:10px">Best peak per day</div>` + lcSlot({ aria: "Best peak height per day", h: 150, x0: -0.5, x1: Math.max(1, X[X.length - 1]) + 0.5, y0: lo - pd, y1: hi + pd, yUnit: "m",
+      yfmt: (t) => t.toFixed(2), xt: [X[0], X[X.length - 1]], xfmt: (t) => dayLabel(ks[X.indexOf(t)] || ks[0]), series: [{ x: X, y: Y, color: "var(--pink)", w: 2.4, fill: true }], dots: X.map((x, i) => ({ x, y: Y[i] })) });
+  }
+  // what goes with height: the faster last 5 m, the higher? (only with a few runs)
+  let note = "";
+  const sp = wp.filter((r) => r.res.last5 && r.res.last5.speed);
+  if (sp.length >= 4) {
+    const xs = sp.map((r) => r.res.last5.speed), ys = sp.map((r) => pk(r).z), mx = xs.reduce((s, v) => s + v, 0) / xs.length, my = ys.reduce((s, v) => s + v, 0) / ys.length;
+    let sxy = 0, sxx = 0; xs.forEach((x, i) => { sxy += (x - mx) * (ys[i] - my); sxx += (x - mx) ** 2; });
+    const slope = sxx ? sxy / sxx : 0;
+    if (Math.abs(slope) > 0.02) note = `Across these runs, each extra 0.1 m/s into the box has gone with about <b style="color:var(--text)">${Math.abs(slope * 10).toFixed(0)} cm ${slope > 0 ? "more" : "less"}</b> peak height.`;
+  }
+  const ft = (m) => ftLabel(m / FT);
+  return `<div class="card"><div class="between"><div class="label">Hip path · ${pick === best ? "best" : dayLabel(dayKey(pick.ts))}</div><span class="small muted">${wp.length} with a pod · latest in grey</span></div>${svg}
+    <div class="jx"><div><span>Best peak</span><b>${pk(best).z.toFixed(2)}<small>m</small></b></div><div><span>Average peak</span><b>${aZ.toFixed(2)}<small>m</small></b></div><div><span>Peak past box</span><b>${aX.toFixed(2)}<small>m</small></b></div></div>
+    <div class="small muted" style="margin-top:8px">Best ${ft(pk(best).z)} on ${dayLabel(dayKey(best.ts))}. On average the peak comes ${Math.abs(aX).toFixed(2)} m ${aX >= 0 ? "past" : "before"} the box, from a takeoff ${aTO.toFixed(2)} m out.${note ? " " + note : ""}${wp.some((r) => r.res.pod.sim) ? " Includes simulated runs." : ""}</div>
+    <div class="chips" style="margin-top:10px">${wp.slice(0, 8).map((r) => `<button class="chip" data-act="hip-run" data-id="${r.id}" aria-pressed="${r === pick}">${pk(r).z.toFixed(2)} m · ${dayLabel(dayKey(r.ts))}</button>`).join("")}</div>
+    ${ch}</div>`;
 }
 // keep a path small: 50 points a second, mm
 function pathKeep(P) {
@@ -2040,6 +2104,7 @@ function sessionHTML(k) {
       return `<div class="label" style="margin:12px 0 4px">${esc(athleteById(aid).name)} · best ${(b.h * 100).toFixed(1)} cm</div><div class="list">${js.slice().reverse().map((j) => `<div class="item"><div>${timeLabel(j.ts)}${j.sim ? ` <span class="small muted">sim</span>` : ""}</div><div class="r"><b>${(j.h * 100).toFixed(1)}</b>${j.hStand != null ? ` <span class="small muted">/ ${(j.hStand * 100).toFixed(1)}</span>` : ""}${j === b ? ` <span class="pill ok">best</span>` : ""}</div></div>`).join("")}</div>`; }).join("")}</div>`;
   }
   if (!list.length) return h + (jl.length ? "" : `<div class="card empty">No runs on this day.</div>`);
+  h += sessionHipCard(list);
   const byA = {}; for (const r of list) (byA[r.athleteId] = byA[r.athleteId] || []).push(r);
   for (const [aid, rs] of Object.entries(byA)) {
     const best = {};
@@ -2255,6 +2320,7 @@ function analyticsHTML() {
   h += `</div></div>`;
   // what matters for this test
   h += isSprint ? sprintProfileCard(mine, tr) : vaultProfileCard(tr);
+  if (!isSprint && !(SETUPS[anState.test.split("-")[1]] || {}).pole) h += vaultHipCard(tr);
   // fastest at each distance (all sprints)
   if (isSprint) {
     const sprints = mine.filter((r) => r.mode === "sprint");
@@ -2539,7 +2605,9 @@ document.addEventListener("click", (e) => {
     case "del-run": if (el.dataset.confirm === "1") { runs = runs.filter((r) => r.id !== id); compareSel = compareSel.filter((x) => x !== id); saveRuns(); toast("Run deleted"); back(); } else { el.dataset.confirm = "1"; el.textContent = "Tap again to delete"; } break;
     case "an-ath": anState.athleteId = id; if (!(anState.test === "jump" ? jumps.some((j) => j.athleteId === id) : runs.some((r) => r.athleteId === id && testKey(r) === anState.test))) anState.test = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); break;
     case "mid-out": settings.midOut = +v; saveSettings(); render(); break;
-    case "an-test": anState.test = v; anState.cmp = null; render(); break;
+    case "an-test": anState.test = v; anState.cmp = null; anState.hipRun = null; render(); break;
+    case "hip-run": anState.hipRun = id; render(); break;
+    case "hip-toggle": { const o = anState.hipOff || (anState.hipOff = {}); o[id] = !o[id]; render(); break; }
     case "jcmp": { const s = anState.jcmp || [], i = s.indexOf(id); if (i >= 0) { if (s.length > 1) s.splice(i, 1); } else if (s.length >= 6) toast("Up to six athletes."); else s.push(id); anState.jcmp = s; render(); break; }
     case "jcmp-report": { const ids = (anState.jcmp || []).filter((x) => jumps.some((j) => j.athleteId === x)); if (ids.length > 1) openJumpCompareReport(ids); else toast("Pick at least two athletes to compare."); break; }
     case "an-cmp": { const s = anState.cmp || [], i = s.indexOf(id); if (i >= 0) { if (s.length > 1) s.splice(i, 1); } else if (s.length >= 4) toast("Up to four athletes on the chart."); else s.push(id); anState.cmp = s; render(); break; }
