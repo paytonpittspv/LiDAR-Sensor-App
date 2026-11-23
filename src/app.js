@@ -1566,7 +1566,8 @@ function hipSVG(paths) {
   const from = (P) => Math.max(0, P.x.findIndex((x) => x > xMin));
   const mat = Math.max(0.3, podRest() - 0.15);
   let g = "";
-  for (let x = Math.ceil(xMin); x <= xMax; x++) g += `<line x1="${sx(x)}" x2="${sx(x)}" y1="${pt}" y2="${H - pb}" class="hp-grid"/>${x % 2 === 0 ? `<text x="${sx(x)}" y="${H - 6}" class="hp-t" text-anchor="middle">${x === 0 ? "box" : x + " m"}</text>` : ""}`;
+  // along the runway in feet (every 5', labelled every 10'), heights in metres
+  for (let f = Math.ceil(xMin / FT / 5) * 5; f * FT <= xMax; f += 5) g += `<line x1="${sx(f * FT)}" x2="${sx(f * FT)}" y1="${pt}" y2="${H - pb}" class="hp-grid"/>${f % 10 === 0 ? `<text x="${sx(f * FT)}" y="${H - 6}" class="hp-t" text-anchor="middle">${f === 0 ? "box" : `${f}'`}</text>` : ""}`;
   for (let z = 1; z < zMax; z++) g += `<line x1="${pl}" x2="${W - pr}" y1="${sz(z)}" y2="${sz(z)}" class="hp-grid"/><text x="${pl - 4}" y="${sz(z) + 4}" class="hp-t" text-anchor="end">${z}</text>`;
   const ghosts = paths.filter((p) => p.P !== main).map(({ P }) => `<polyline points="${pts(P, from(P), P.x.length - 1)}" class="hp-ghost"/>`).join("");
   const to = main.jTO, n = main.x.length;
@@ -1591,8 +1592,8 @@ function hipSVG(paths) {
 }
 function hipPathHTML(P, sim) {
   const past = P.peak.x, toX = P.x[P.jTO];
-  return `<div class="card" style="grid-column:1/-1"><div class="between"><div class="label">Hip path${sim ? " · simulated" : ""}</div><span class="small muted">metres · box at 0</span></div>${hipSVG([{ P, main: true }])}
-    <div class="small muted" style="margin-top:6px">Highest at <b style="color:var(--text)">${P.peak.z.toFixed(2)} m</b>, ${Math.abs(past).toFixed(2)} m ${past >= 0 ? "past" : "before"} the box · takeoff ${Math.abs(toX).toFixed(2)} m out · landed ${P.x[P.x.length - 1].toFixed(2)} m past the box, <b style="color:var(--text)">${pitSpot(P.x[P.x.length - 1])}</b>. Grey: the run-up (LiDAR), colour: off the ground (waist pod).</div></div>`;
+  return `<div class="card" style="grid-column:1/-1"><div class="between"><div class="label">Hip path${sim ? " · simulated" : ""}</div><span class="small muted">height in m · runway in feet</span></div>${hipSVG([{ P, main: true }])}
+    <div class="small muted" style="margin-top:6px">Highest at <b style="color:var(--text)">${P.peak.z.toFixed(2)} m</b> (${ftLabel(P.peak.z / FT)}), ${ftLabel(Math.abs(past) / FT)} ${past >= 0 ? "past" : "before"} the box · takeoff ${ftLabel(Math.abs(toX) / FT)} out · landed ${ftLabel(P.x[P.x.length - 1] / FT)} past the box, <b style="color:var(--text)">${pitSpot(P.x[P.x.length - 1])}</b>. Grey: the run-up (LiDAR), colour: off the ground (waist pod).</div></div>`;
 }
 // Sessions: the day's vaults with a pod, layered on top of each other, one colour each (tap to hide or show)
 const HP_COLS = ["var(--pink)", "var(--purple)", "var(--blue)", "#e08a00", "#16a34a", "#0f766e", "#db2777", "#4f46e5"];
@@ -1604,7 +1605,7 @@ function sessionHipCard(list) {
   const fn = (id) => { const f = firstName(id), dup = wp.some((r) => r.athleteId !== id && firstName(r.athleteId) === f); return dup ? athleteById(id).name : f; };
   const shown = wp.map((r, i) => ({ r, color: HP_COLS[i % HP_COLS.length] })).filter(({ r }) => !off[r.id]);
   const best = wp.reduce((b, r) => (r.res.pod.path.peak.z > b.res.pod.path.peak.z ? r : b));
-  return `<div class="card"><div class="between"><b style="font-size:17px">Hip paths</b><span class="small muted">${wp.length} vault${wp.length > 1 ? "s" : ""} with a pod · metres</span></div>
+  return `<div class="card"><div class="between"><b style="font-size:17px">Hip paths</b><span class="small muted">${wp.length} vault${wp.length > 1 ? "s" : ""} with a pod · height in m</span></div>
     ${shown.length ? hipSVG(shown.map(({ r, color }) => ({ P: r.res.pod.path, color }))) : `<div class="small muted" style="margin:10px 0">Tap a vault below to show it.</div>`}
     <div class="hpkey">${wp.map((r, i) => `<button data-act="hip-toggle" data-id="${r.id}" aria-pressed="${!off[r.id]}"><i style="background:${HP_COLS[i % HP_COLS.length]}"></i>${names ? esc(fn(r.athleteId)) + " · " : ""}#${i + 1}${both ? ` · ${/150$/.test(r.setup) ? "long" : "short"}` : ""} <b>${r.res.pod.path.peak.z.toFixed(2)} m</b>${r === best ? " ★" : ""}</button>`).join("")}</div>
     <div class="small muted" style="margin-top:6px">In order of the day. ★ highest. Tap to hide or show one.</div></div>`;
@@ -1639,8 +1640,8 @@ function vaultHipCard(tr) {
   }
   const ft = (m) => ftLabel(m / FT);
   return `<div class="card"><div class="between"><div class="label">Hip path · ${pick === best ? "best" : dayLabel(dayKey(pick.ts))}</div><span class="small muted">${wp.length} with a pod · latest in grey</span></div>${svg}
-    <div class="jx"><div><span>Best peak</span><b>${pk(best).z.toFixed(2)}<small>m</small></b></div><div><span>Average peak</span><b>${aZ.toFixed(2)}<small>m</small></b></div><div><span>Peak past box</span><b>${aX.toFixed(2)}<small>m</small></b></div></div>
-    <div class="small muted" style="margin-top:8px">Best ${ft(pk(best).z)} on ${dayLabel(dayKey(best.ts))}. On average the peak comes ${Math.abs(aX).toFixed(2)} m ${aX >= 0 ? "past" : "before"} the box, from a takeoff ${aTO.toFixed(2)} m out.${note ? " " + note : ""}${wp.some((r) => r.res.pod.sim) ? " Includes simulated runs." : ""}</div>
+    <div class="jx"><div><span>Best peak</span><b>${pk(best).z.toFixed(2)}<small>m</small></b><em>${ft(pk(best).z)}</em></div><div><span>Average peak</span><b>${aZ.toFixed(2)}<small>m</small></b><em>${ft(aZ)}</em></div><div><span>Peak past box</span><b>${ft(aX)}</b><em>average</em></div></div>
+    <div class="small muted" style="margin-top:8px">Best on ${dayLabel(dayKey(best.ts))}. On average the peak comes ${ft(Math.abs(aX))} ${aX >= 0 ? "past" : "before"} the box, from a takeoff ${ft(aTO)} out.${note ? " " + note : ""}${wp.some((r) => r.res.pod.sim) ? " Includes simulated runs." : ""}</div>
     <div class="chips" style="margin-top:10px">${wp.slice(0, 8).map((r) => `<button class="chip" data-act="hip-run" data-id="${r.id}" aria-pressed="${r === pick}">${pk(r).z.toFixed(2)} m · ${dayLabel(dayKey(r.ts))}</button>`).join("")}</div>
     ${ch}</div>`;
 }
