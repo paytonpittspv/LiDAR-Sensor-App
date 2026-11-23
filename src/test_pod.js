@@ -58,6 +58,26 @@ for (const cal of [true, false]) {
     eP.push(res.peak - truth);
   }
   report("Vault, peak hip height", eP);
+  // the hip path (LiDAR + pod): where the peak is along the runway, and the whole flight, with the two clocks
+  // lined up exactly and 5 ms off
+  for (const sync of [0, 0.005]) {
+    const ePX = [], eRX = [], eRZ = [];
+    for (let k = 0; k < RUNS / 4; k++) {
+      const V = PodSim.simVaultLidar(8 + 1.5 * rnd(), 1000 + k, { cal }), r = V.rec, hz = r.hz, L = V.lidar, sh = sync * (k % 2 ? 1 : -1);
+      const xAt = (t) => { if (t < 0 || t > L.t[L.t.length - 1]) return null; let j = 0; while (j < L.t.length - 2 && L.t[j + 1] < t) j++; const f = (t - L.t[j]) / (L.t[j + 1] - L.t[j]); return L.d[j] + f * (L.d[j + 1] - L.d[j]) - V.box; };
+      let vRun = 0, c = 0; for (let j = 0; j < L.t.length; j++) if (L.t[j] >= V.tTO - 0.4 && L.t[j] <= V.tTO) { vRun += L.v[j]; c++; }
+      const P = PodEngine.vaultPath(r, { restHeight: V.rest + 0.01 * gauss(), iTO: (V.tTO + sh) * hz, xTO: xAt(V.tTO), vRun: vRun / c, lidarX: (i) => xAt(i / hz - sh) });
+      if (!P.ok) continue;
+      const ofs = V.truth.x[Math.round(V.tTO * hz)] - xAt(V.tTO), tx = (i) => V.truth.x[i] - ofs, tz = V.truth.z;
+      let iPk = P.iTO; for (let i = P.iTO; i < P.iRest; i++) if (tz[i] > tz[iPk]) iPk = i;
+      ePX.push(P.peak.x - tx(iPk));
+      let sx = 0, sz = 0, m = 0; for (let j = P.takeoff.j; j < P.x.length; j++) { const i = P.i0 + j; sx += (P.x[j] - tx(i)) ** 2; sz += (P.z[j] - tz[i]) ** 2; m++; }
+      eRX.push(Math.sqrt(sx / m)); eRZ.push(Math.sqrt(sz / m));
+    }
+    report(`Hip path, peak along the runway (clocks ${sync ? "±5 ms" : "exact"})`, ePX);
+    report(`  whole flight, along the runway (rms)`, eRX);
+    report(`  whole flight, height (rms)`, eRZ);
+  }
   if (fv.length) console.log("  failed:", fv.length, fv[0]);
   console.log(`  (hardest landing in these runs: ${maxG.toFixed(1)} g; the chip reads up to 16 g)`);
 }

@@ -34,24 +34,24 @@ const PodSim = (() => {
     const out = rawRecord({ dur, hip, xs, phi, bounce, breathe, off, hz: hz * over, err });
     if (over === 1) return out;
     // what the pod sends: the mean of each `over` readings (truth height: the slot's middle)
-    const m = { hz, avg: true, ax: [], ay: [], az: [], gx: [], gy: [], gz: [], podZ: [] };
+    const m = { hz, avg: true, ax: [], ay: [], az: [], gx: [], gy: [], gz: [], podZ: [], podX: [] };
     for (let i = 0; i + over <= out.ax.length; i += over) for (const k of ["ax", "ay", "az", "gx", "gy", "gz"]) { let s = 0; for (let j = 0; j < over; j++) s += out[k][i + j]; m[k].push(s / over); }
-    for (let i = 0; i + over <= out.ax.length; i += over) m.podZ.push(out.podZ[i]);
+    for (let i = 0; i + over <= out.ax.length; i += over) { m.podZ.push(out.podZ[i]); m.podX.push(out.podX[i]); }
     return m;
   }
   function rawRecord({ dur, hip, xs, phi, bounce, breathe, off, hz, err }) {
-    const N = Math.round(dur * hz), out = { hz, ax: [], ay: [], az: [], gx: [], gy: [], gz: [], podZ: [] };
+    const N = Math.round(dur * hz), out = { hz, ax: [], ay: [], az: [], gx: [], gy: [], gz: [], podZ: [], podX: [] };
     // the chip sits a few degrees off on its board and in the pod: a fixed tilt the math must not care about
     const m = err.mount;
     for (let i = 0; i < N; i++) {
-      const t = i / hz, [z, vz, az0] = hip(t), [, , ax0] = xs(t);
+      const t = i / hz, [z, vz, az0] = hip(t), [x0, , ax0] = xs(t);
       let [p, dp, ddp] = phi(t);
       let zb = 0, azb = 0; if (bounce) [zb, azb] = bounce(t);
       if (breathe) { const [bz, baz, bp, bdp, bddp] = breathe(t); zb += bz; azb += baz; p += bp; dp += bdp; ddp += bddp; }
       // pod position and acceleration: hip + off·n(phi), n = (cos φ, sin φ)
       const c = Math.cos(p), s = Math.sin(p);
       const aX = ax0 + off * (-s * ddp - c * dp * dp), aZ = az0 + azb + off * (c * ddp - s * dp * dp);
-      out.podZ.push(z + zb + off * s);
+      out.podZ.push(z + zb + off * s); out.podX.push(x0 + off * c);
       // what the accelerometer feels (world): motion plus gravity's push-back
       const f = [aX, 0, aZ + G];
       // pod axes (world): x along the strap (sideways), y toward the head, z out of the body
@@ -128,6 +128,17 @@ const PodSim = (() => {
     r.calibrated = true;
     return { rec: r, rest: r.podZ[r.podZ.length - 1], truth: V.truth.zPeak };
   }
-  return { path, setGyroSign: (s) => (GYRO_SIGN = s), record, jump, vault, chipErrors, setSeed: (v) => (seed = v), gauss, simJump, simVault };
+  // a vault with the LiDAR too: the pod recording, what the LiDAR's run curve would hold (time from the run's
+  // start, distance from the start, speed) and the truth (the pod's own path, x past the box, z up)
+  function simVaultLidar(speed = 9, s = 7, o = {}) {
+    seed = s % 2147483646 + 1;
+    const zRel = 4.2 + Math.max(-0.6, Math.min(0.9, (speed - 8.3) * 0.35)) + 0.1 * gauss(), vRel = 0.4 + 0.8 * rnd();
+    const V = vault(zRel, vRel, 0.8), r = record({ ...V, err: chipErrors(o.cal !== false) }); r.calibrated = o.cal !== false;
+    const BOX = 30.8, tGo = 0;               // the sim's run is already at speed from t = 0: call that the start
+    const lid = { t: [], d: [], v: [] };
+    for (let t = 0; t <= 3.25; t += 0.02) { const [x, v] = V.xs(t); lid.t.push(+t.toFixed(3)); lid.d.push(x + 0.005 * gauss()); lid.v.push(v); }
+    return { rec: r, rest: r.podZ[r.podZ.length - 1], lidar: lid, box: BOX, tTO: 3.0, truth: { x: r.podX.map((x) => x - BOX), z: r.podZ, zPeak: V.truth.zPeak } };
+  }
+  return { simVaultLidar, path, setGyroSign: (s) => (GYRO_SIGN = s), record, jump, vault, chipErrors, setSeed: (v) => (seed = v), gauss, simJump, simVault };
 })();
 if (typeof module !== "undefined") module.exports = PodSim;

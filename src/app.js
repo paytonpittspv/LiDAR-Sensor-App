@@ -1155,6 +1155,7 @@ function resultsHTML(run) {
     h += cardHTML("Approach", f2(R.approachTime), "s", `${f1(R.approachDist)} m to takeoff`);
     if (R.pod) h += R.pod.error ? cardHTML("Peak hip height ≈", "—", "", esc(R.pod.error)) : cardHTML("Peak hip height ≈", ftLabel(R.pod.peak / FT), "", `${R.pod.peak.toFixed(2)} m · waist pod${R.pod.sim ? " (simulated)" : R.pod.cal ? "" : " (not calibrated)"}${R.pod.note ? " · " + esc(R.pod.note) : ""}`);
     else if (!(SETUPS[run.setup] || {}).pole) h += cardHTML("Peak hip height ≈", "—", "", "Wear a waist pod to measure it");
+    if (R.pod && R.pod.path) h += hipPathHTML(R.pod.path, R.pod.sim);
     h += `</div>`;
   }
   if (run.mode === "vault") h += leftsCardHTML(run);
@@ -1387,12 +1388,15 @@ const podRest = () => settings.podRest || 1.0;   // the pod's height off the gro
 function parsePod(buf) {
   const dv = new DataView(buf);
   if (buf.byteLength < 32 || String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)) !== "POD1") return null;
+  const ver = dv.getUint16(4, true), H = ver >= 2 ? 40 : 32;
   const hz = dv.getUint16(6, true), n = dv.getUint32(8, true), seq = dv.getUint32(12, true), flags = dv.getUint32(16, true);
   const aL = dv.getFloat32(20, true), gL = dv.getFloat32(24, true);
   const r = { hz, seq, avg: !!(flags & 2), calibrated: !!(flags & 1), ax: [], ay: [], az: [], gx: [], gy: [], gz: [] };
-  const m = Math.min(n, Math.floor((buf.byteLength - 32) / 12));
+  // version 2: the pod's micros() at the last sample, and its measured rate (the chip's clock can be ~1% off)
+  if (ver >= 2) { r.lastUs = dv.getUint32(32, true); const rate = dv.getFloat32(36, true); if (Math.abs(rate / hz - 1) < 0.05) r.hz = rate; }
+  const m = Math.min(n, Math.floor((buf.byteLength - H) / 12));
   for (let i = 0; i < m; i++) {
-    const o = 32 + i * 12;
+    const o = H + i * 12;
     r.ax.push(dv.getInt16(o, true) * aL); r.ay.push(dv.getInt16(o + 2, true) * aL); r.az.push(dv.getInt16(o + 4, true) * aL);
     r.gx.push(dv.getInt16(o + 6, true) * gL); r.gy.push(dv.getInt16(o + 8, true) * gL); r.gz.push(dv.getInt16(o + 10, true) * gL);
   }
@@ -1469,8 +1473,10 @@ function podMessage(m, id) {
 async function podFetch(id) {
   const st = pst(id); st.busy = true; pod.focus = id; if (view === "jump") render();
   try {
-    const rec = parsePod(await (await fetch(`/pod/data?id=${encodeURIComponent(id)}`, { cache: "no-store" })).arrayBuffer());
+    const resp = await fetch(`/pod/data?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+    const rec = parsePod(await resp.arrayBuffer());
     if (!rec) return;
+    const off = resp.headers.get("X-Pod-Off"); if (off != null && off !== "") rec.off = Number(off) >>> 0;   // sensor µs − pod µs
     pod.last = rec;
     if (view === "jump") podJump(rec, false, id); else podVault(rec);
   } catch (e) {} finally { st.busy = false; }
@@ -1500,6 +1506,61 @@ function simPodPeak(run) {
   if ((SETUPS[run.setup] || {}).pole || !run.res) return;
   const sp = (run.res.last5 && run.res.last5.speed) || 8.3, S = PodSim.simVault(sp), R = PodEngine.analyzeVault(S.rec, S.rest);
   run.res.pod = R.ok ? { peak: R.peak, impact: R.impactSpeed, flight: R.flightTime, note: R.note, cal: true, sim: true } : { error: R.why };
+  // and a simulated hip path (its own simulated LiDAR run, lined up exactly)
+  try {
+    const V = PodSim.simVaultLidar(sp, Math.floor(Math.random() * 1e9)), hz = V.rec.hz, L = V.lidar;
+    const xAt = (t) => { if (t < 0 || t > L.t[L.t.length - 1]) return null; let j = 0; while (j < L.t.length - 2 && L.t[j + 1] < t) j++; const f = (t - L.t[j]) / (L.t[j + 1] - L.t[j]); return L.d[j] + f * (L.d[j + 1] - L.d[j]) - V.box; };
+    let vRun = 0, c = 0; for (let k = 0; k < L.t.length; k++) if (L.t[k] >= V.tTO - 0.4 && L.t[k] <= V.tTO) { vRun += L.v[k]; c++; }
+    const P = PodEngine.vaultPath(V.rec, { restHeight: V.rest, iTO: V.tTO * hz, xTO: xAt(V.tTO), vRun: vRun / c, lidarX: (i) => (i / hz <= V.tTO ? xAt(i / hz) : null) });
+    if (P.ok && run.res.pod.peak) { run.res.pod.path = pathKeep(P); run.res.pod.peak = P.peak.z; }
+  } catch (e) {}
+}
+// the hip path, side on: run-up (LiDAR + pod), takeoff, up the pole, over, down to the mat. Box at 0.
+function hipPathHTML(P, sim) {
+  const xs = P.x, zs = P.z, n = xs.length, j0 = Math.max(0, xs.findIndex((x) => x > -6.5));
+  const xMin = -6.5, xMax = Math.max(4, Math.max(...xs.slice(j0)) + 0.6), zMax = Math.max(5, P.peak.z + 0.6);
+  const W = 640, H = Math.round(W * (zMax / (xMax - xMin)) * 1.0), pl = 26, pb = 22, pt = 10, pr = 10;
+  const sx = (x) => pl + ((x - xMin) / (xMax - xMin)) * (W - pl - pr), sz = (z) => H - pb - (z / zMax) * (H - pb - pt);
+  const seg = (a, b) => xs.slice(a, b + 1).map((x, k) => `${sx(x).toFixed(1)},${sz(zs[a + k]).toFixed(1)}`).join(" ");
+  const mat = Math.max(0.3, podRest() - 0.15);
+  let g = "";
+  for (let x = Math.ceil(xMin); x <= xMax; x++) g += `<line x1="${sx(x)}" x2="${sx(x)}" y1="${pt}" y2="${H - pb}" class="hp-grid"/>${x % 2 === 0 ? `<text x="${sx(x)}" y="${H - 6}" class="hp-t" text-anchor="middle">${x === 0 ? "box" : x + " m"}</text>` : ""}`;
+  for (let z = 1; z < zMax; z++) g += `<line x1="${pl}" x2="${W - pr}" y1="${sz(z)}" y2="${sz(z)}" class="hp-grid"/><text x="${pl - 4}" y="${sz(z) + 4}" class="hp-t" text-anchor="end">${z}</text>`;
+  const pk = P.jPeak, to = P.jTO;
+  const svg = `<svg viewBox="0 0 ${W} ${H}" class="hp" role="img" aria-label="Hip path through the vault">
+    <defs><linearGradient id="hpG" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="var(--pink)"/><stop offset=".55" stop-color="var(--purple)"/><stop offset="1" stop-color="var(--blue)"/></linearGradient></defs>
+    ${g}<line x1="${pl}" x2="${W - pr}" y1="${sz(0)}" y2="${sz(0)}" class="hp-ground"/>
+    <rect x="${sx(0.3)}" y="${sz(mat)}" width="${sx(xMax) - sx(0.3)}" height="${sz(0) - sz(mat)}" rx="4" class="hp-mat"/>
+    <path d="M${sx(-0.55)},${sz(0)} L${sx(0)},${sz(-0.01) + 6} L${sx(0)},${sz(0)}" class="hp-box"/>
+    <polyline points="${seg(j0, to)}" class="hp-run"/><polyline points="${seg(to, n - 1)}" class="hp-air" stroke="url(#hpG)"/>
+    <circle cx="${sx(xs[to])}" cy="${sz(zs[to])}" r="5" class="hp-dot"/><text x="${sx(xs[to])}" y="${sz(zs[to]) + 20}" class="hp-l" text-anchor="middle">takeoff</text>
+    <circle cx="${sx(P.peak.x)}" cy="${sz(P.peak.z)}" r="6" class="hp-pk"/><text x="${sx(P.peak.x)}" y="${sz(P.peak.z) - 12}" class="hp-l hp-big" text-anchor="middle">${P.peak.z.toFixed(2)} m</text>
+  </svg>`;
+  const past = P.peak.x, toX = xs[to];
+  return `<div class="card" style="grid-column:1/-1"><div class="between"><div class="label">Hip path${sim ? " · simulated" : ""}</div><span class="small muted">metres · box at 0</span></div>${svg}
+    <div class="small muted" style="margin-top:6px">Highest at <b style="color:var(--text)">${P.peak.z.toFixed(2)} m</b>, ${Math.abs(past).toFixed(2)} m ${past >= 0 ? "past" : "before"} the box · takeoff ${Math.abs(toX).toFixed(2)} m out. Grey: the run-up (LiDAR), colour: off the ground (waist pod).</div></div>`;
+}
+// keep a path small: 50 points a second, mm
+function pathKeep(P) {
+  const step = Math.max(1, Math.round(P.hz / 50)), x = [], z = [];
+  for (let j = 0; j < P.x.length; j += step) { x.push(+P.x[j].toFixed(3)); z.push(+P.z[j].toFixed(3)); }
+  return { dt: step / P.hz, x, z, jTO: Math.round(P.takeoff.j / step), jPeak: Math.round(P.peak.j / step), peak: { x: +P.peak.x.toFixed(3), z: +P.peak.z.toFixed(3) }, gs: +P.gyroScale.toFixed(4) };
+}
+// the real thing: line the pod's recording up with the LiDAR's run (both on the sensor's clock) and fuse them
+function podPath(rec, run) {
+  const R = run.res;
+  if (rec.lastUs == null || rec.off == null || R.us0 == null || !R.takeoff || R.box == null || !R.curve) return null;
+  const N = rec.ax.length, hz = rec.hz, endUs = (rec.lastUs + rec.off) >>> 0;
+  // run time (s from the run's start) ↔ pod sample index
+  const iAt = (t) => N - 1 - (((endUs - ((R.us0 + Math.round(t * 1e6)) >>> 0)) | 0) * hz) / 1e6;
+  const tAt = (i) => (((((endUs - Math.round(((N - 1 - i) * 1e6) / hz)) >>> 0) - R.us0) | 0) / 1e6);
+  const C = R.curve, box = R.box, d0 = R.start.d, tTO = R.takeoff.t;
+  const xAt = (t) => { if (t < C.t[0] || t > tTO) return null; let j = 0; while (j < C.t.length - 2 && C.t[j + 1] < t) j++; const f = (t - C.t[j]) / ((C.t[j + 1] - C.t[j]) || 1e-9); return C.d[j] + f * (C.d[j + 1] - C.d[j]) + d0 - box; };
+  let vRun = 0, c = 0; for (let k = 0; k < C.t.length; k++) if (C.t[k] >= tTO - 0.4 && C.t[k] <= tTO) { vRun += C.v[k]; c++; }
+  if (!c) return null;
+  const iTO = iAt(tTO); if (!(iTO > hz && iTO < N - hz)) return null;
+  const P = PodEngine.vaultPath(rec, { restHeight: podRest(), iTO, xTO: R.takeoff.sensor - box, vRun: vRun / c, lidarX: (i) => xAt(tAt(i)) });
+  return P.ok ? pathKeep(P) : null;
 }
 function podVault(rec) {
   // the latest vault run on the runway (not a pole run: that has no pit landing), finished within the last 90 s
@@ -1507,6 +1568,7 @@ function podVault(rec) {
   if (!cand) return;
   const R = PodEngine.analyzeVault(rec, podRest());
   cand.res.pod = R.ok ? { peak: R.peak, impact: R.impactSpeed, flight: R.flightTime, note: R.note, cal: rec.calibrated } : { error: R.why };
+  if (R.ok) { try { const P = podPath(rec, cand); if (P) { cand.res.pod.path = P; cand.res.pod.peak = P.peak.z; } } catch (e) {} }
   if (runs.includes(cand)) saveRuns();
   toast(R.ok ? `Peak hip height ${ftLabel(R.peak / FT)} (${R.peak.toFixed(2)} m)` : `Waist pod: ${R.why}`);
   render();

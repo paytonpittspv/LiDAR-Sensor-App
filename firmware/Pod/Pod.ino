@@ -24,7 +24,7 @@
 #include <Preferences.h>
 #include <esp_sleep.h>
 
-static const char* FW = "pod-1.3";
+static const char* FW = "pod-1.4";
 char podId[8] = "pod";                      // the end of this pod's Wi-Fi address: tells the sensor which pod is which
 static const char* SSID = "SpeedLidar";
 static const char* PASS = "vault1234";
@@ -42,6 +42,11 @@ static const float ACC_LSB = 9.80665f / 2048.f, GYR_LSB = (3.14159265f / 180.f) 
 static const int RING = HZ * RING_S;
 Sample* ring = nullptr;
 volatile uint32_t head = 0;                   // total samples ever written (ring index = head % RING)
+// timing, so the app can line the pod's samples up with the LiDAR's: the chip's own clock runs up to ~1% off, so
+// the real rate is measured against micros(), and the time of each sample worked out from the newest FIFO read
+volatile uint32_t rawTotal = 0;               // chip readings ever taken (OVER of them make one sample)
+volatile uint32_t stampRaw = 0, stampUs = 0;  // at micros() stampUs, stampRaw readings had been made
+float rawRate = (float)HZ * OVER;             // measured readings per second
 
 Preferences prefs;
 uint8_t addr = 0x68;
@@ -145,15 +150,18 @@ void readerTask(void*) {
     if (!imuOk) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
     uint8_t lb[2];
     if (!rd(0x22, lb, 2)) { vTaskDelay(pdMS_TO_TICKS(5)); continue; }
+    uint32_t tRead = micros();
     int len = (lb[0] | (lb[1] & 0x07) << 8);
     if (len >= 1000) { wr(0x7E, 0xB0); n = 0; continue; }   // overflowed: start clean
     len -= len % 12;
+    stampRaw = rawTotal + len / 12; stampUs = tRead;        // everything in the FIFO was made by now
     while (len > 0) {
       int take = len > (int)sizeof buf ? (int)sizeof buf - (int)sizeof buf % 12 : len;
       if (!rd(0x24, buf, take)) break;
       for (int i = 0; i < take; i += 12) {
         // headerless frame: gyro x y z, then accel x y z (little-endian int16)
         for (int k = 0; k < 3; k++) { gyr[k] += (int16_t)(buf[i + 2 * k] | buf[i + 2 * k + 1] << 8); acc[k] += (int16_t)(buf[i + 6 + 2 * k] | buf[i + 7 + 2 * k] << 8); }
+        rawTotal = rawTotal + 1;
         if (++n == OVER) { onSample(acc, gyr); acc[0] = acc[1] = acc[2] = gyr[0] = gyr[1] = gyr[2] = 0; n = 0; }
       }
       len -= take;
@@ -190,15 +198,19 @@ const char* calibrateSide(int side) {
 
 // ---------------- talking to the sensor ----------------
 uint32_t seq = 0; String lastMsg = "";
-// the last SEND_S seconds as one message: a 32-byte header, then the samples
+// the last SEND_S seconds as one message: a 40-byte header, then the samples. Version 2 adds the pod's micros() at
+// the last sample (the middle of its 4 readings) and the measured sample rate.
 bool pushCapture() {
   uint32_t h = head, count = min<uint32_t>(h, (uint32_t)HZ * SEND_S);
-  size_t len = 32 + count * sizeof(Sample);
+  uint32_t sRaw = stampRaw, sUs = stampUs;
+  float lastRaw = (float)(h - 1) * OVER + (OVER - 1) / 2.f;          // reading index at the last sample's middle
+  uint32_t lastUs = sUs + (int32_t)lrintf((lastRaw - (float)(sRaw - 1)) / rawRate * 1e6f);
+  size_t len = 40 + count * sizeof(Sample);
   uint8_t* buf = (uint8_t*)ps_malloc(len); if (!buf) return false;
-  struct __attribute__((packed)) { char magic[4]; uint16_t ver, hz; uint32_t count, seq, flags; float accLsb, gyrLsb; uint32_t pad; } hd =
-    {{'P', 'O', 'D', '1'}, 1, (uint16_t)HZ, count, ++seq, (uint32_t)((calibrated ? 1 : 0) | 2 /* averaged */), ACC_LSB, GYR_LSB, 0};
-  memcpy(buf, &hd, 32);
-  for (uint32_t i = 0; i < count; i++) ((Sample*)(buf + 32))[i] = ring[(h - count + i) % RING];
+  struct __attribute__((packed)) { char magic[4]; uint16_t ver, hz; uint32_t count, seq, flags; float accLsb, gyrLsb; uint32_t pad, lastUs; float rate; } hd =
+    {{'P', 'O', 'D', '1'}, 2, (uint16_t)HZ, count, ++seq, (uint32_t)((calibrated ? 1 : 0) | 2 /* averaged */), ACC_LSB, GYR_LSB, 0, lastUs, rawRate / OVER};
+  memcpy(buf, &hd, 40);
+  for (uint32_t i = 0; i < count; i++) ((Sample*)(buf + 40))[i] = ring[(h - count + i) % RING];
   HTTPClient http; http.begin(String(SENSOR) + "/pod/push?id=" + podId); http.addHeader("Content-Type", "application/octet-stream"); http.setTimeout(8000);
   int code = http.POST(buf, len); http.end(); free(buf);
   return code == 200;
@@ -211,8 +223,8 @@ uint8_t phaseNow() {
 void hello() {
   HTTPClient http; http.setTimeout(1500);
   char q[240];
-  snprintf(q, sizeof q, "%s/pod/hello?id=%s&fw=%s&imu=%d&cal=%d&sides=%u&rssi=%d&still=%d&ph=%u&v=%d&up=%lu&msg=%s", SENSOR, podId, FW, imuOk ? 1 : 0, calibrated ? 1 : 0,
-           (unsigned)sidesDone, WiFi.RSSI(), stillRun >= (uint32_t)HZ ? 1 : 0, (unsigned)phaseNow(), (int)lrintf(liveV * 100.f), (unsigned long)(millis() / 1000), lastMsg.c_str());
+  snprintf(q, sizeof q, "%s/pod/hello?id=%s&fw=%s&imu=%d&cal=%d&sides=%u&rssi=%d&still=%d&ph=%u&v=%d&us=%lu&up=%lu&msg=%s", SENSOR, podId, FW, imuOk ? 1 : 0, calibrated ? 1 : 0,
+           (unsigned)sidesDone, WiFi.RSSI(), stillRun >= (uint32_t)HZ ? 1 : 0, (unsigned)phaseNow(), (int)lrintf(liveV * 100.f), (unsigned long)micros(), (unsigned long)(millis() / 1000), lastMsg.c_str());
   http.begin(q);
   if (http.GET() != 200) { http.end(); return; }
   String r = http.getString(); http.end();
@@ -259,8 +271,16 @@ void setup() {
 }
 
 void loop() {
-  static uint32_t helloAt = 0, ledAt = 0;
+  static uint32_t helloAt = 0, ledAt = 0, rateAt = 0;
   uint32_t now = millis();
+  // the chip's real reading rate, against micros(), over the last ~10 s (the chip's clock can be ~1% off)
+  if (now - rateAt >= 1000) {
+    rateAt = now;
+    static uint32_t hR[12], hU[12]; static uint8_t hn = 0;
+    hR[hn % 12] = stampRaw; hU[hn % 12] = stampUs; hn++;
+    if (hn > 3) { uint8_t o = hn > 12 ? hn % 12 : 0, l = (hn - 1) % 12; uint32_t dr = hR[l] - hR[o], du = hU[l] - hU[o];
+      if (du > 2000000 && dr > 0) { float f = dr * 1e6f / du; if (fabsf(f / (HZ * OVER) - 1.f) < 0.05f) rawRate = f; } }
+  }
   ArduinoOTA.handle();
   bool up = WiFi.status() == WL_CONNECTED;
   // LED: slow blink looking for the sensor; a short blip every 2 s once connected

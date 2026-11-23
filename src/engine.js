@@ -294,6 +294,8 @@ const Engine = (() => {
     const speedAtK = (k) => L.v[Math.max(0, Math.min(n - 1, k))];
 
     const res = { ctx, fs, start: { threshold: START_MS, t: tGo, d: dGo } };
+    // the sensor's micros() at the run's time zero (curve t = 0), to line up the waist pod's recording
+    if (raw.t && raw.t.length) res.us0 = (raw.t[0] + Math.round((tr.t0 + tGo) * 1e6)) >>> 0;
 
     // ----- where the run ends -----
     let kEnd = n - 1;

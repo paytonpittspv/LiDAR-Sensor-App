@@ -558,6 +558,10 @@ html.disp-on,html.disp-on body{overflow:hidden}
 .jx{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.jx div{background:var(--tint);border:1px solid var(--line);border-radius:12px;padding:8px 10px;min-width:0}
 .jx span{display:block;font-size:12px;color:var(--muted);font-family:var(--ui);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.jx b{font-size:24px;line-height:1.1;white-space:nowrap}.jx small{font-size:.55em;color:var(--muted);margin-left:2px}
 .jtab th,.jtab td{padding:8px 4px}.jtab td .small{white-space:nowrap}
+.hp{width:100%;height:auto;display:block;margin-top:6px}.hp-grid{stroke:var(--line);stroke-width:1}.hp-t{font-size:11px;fill:var(--muted);font-family:var(--ui)}
+.hp-ground{stroke:var(--muted);stroke-width:1.5}.hp-mat{fill:color-mix(in srgb,var(--blue) 22%,transparent);stroke:color-mix(in srgb,var(--blue) 45%,transparent)}.hp-box{fill:var(--muted);stroke:none}
+.hp-run{fill:none;stroke:var(--muted);stroke-width:3;stroke-linejoin:round;stroke-linecap:round}.hp-air{fill:none;stroke-width:4;stroke-linejoin:round;stroke-linecap:round}
+.hp-dot{fill:var(--bg);stroke:var(--text);stroke-width:2}.hp-pk{fill:var(--pink);stroke:var(--bg);stroke-width:2}.hp-l{font-size:12px;fill:var(--muted);font-family:var(--ui);font-weight:600}.hp-big{font-size:15px;fill:var(--text);font-weight:800}
 .jump-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}.jump-two .jump-big{font-size:clamp(34px,11vw,52px)}
 .jump-big{font-family:var(--display);font-weight:800;font-size:64px;line-height:1;margin:4px 0}
 .jump-big small{font-size:22px;color:var(--muted);margin-left:6px}
@@ -875,6 +879,8 @@ const Engine = (() => {
     const speedAtK = (k) => L.v[Math.max(0, Math.min(n - 1, k))];
 
     const res = { ctx, fs, start: { threshold: START_MS, t: tGo, d: dGo } };
+    // the sensor's micros() at the run's time zero (curve t = 0), to line up the waist pod's recording
+    if (raw.t && raw.t.length) res.us0 = (raw.t[0] + Math.round((tr.t0 + tGo) * 1e6)) >>> 0;
 
     // ----- where the run ends -----
     let kEnd = n - 1;
@@ -1171,21 +1177,21 @@ const PodEngine = (() => {
   // ---- integrate the vertical motion from sample i0 to i1 (dir +1 forward, -1 backward) ----
   // q0: orientation at i0; bias: gyro bias. Returns per-sample vertical acceleration, velocity and height (world z),
   // relative to the starting values v0 / z0.
-  function integrate(r, i0, i1, dir, q0, bias, v0 = 0, z0 = 0, g = G, scale = 1) {
-    const dt = 1 / r.hz, len = Math.abs(i1 - i0) + 1, A = new Float64Array(len), V = new Float64Array(len), Z = new Float64Array(len);
+  function integrate(r, i0, i1, dir, q0, bias, v0 = 0, z0 = 0, g = G, scale = 1, gs = 1) {
+    const dt = 1 / r.hz, len = Math.abs(i1 - i0) + 1, A = new Float64Array(len), V = new Float64Array(len), Z = new Float64Array(len), AX = new Float64Array(len), AY = new Float64Array(len);
     let q = q0, v = v0, z = z0, prevA = null;
     for (let k = 0, i = i0; k < len; k++, i += dir) {
-      const aw = rot(q, [r.ax[i] * scale, r.ay[i] * scale, r.az[i] * scale])[2] - g;
+      const w3 = rot(q, [r.ax[i] * scale, r.ay[i] * scale, r.az[i] * scale]), aw = w3[2] - g; AX[k] = w3[0]; AY[k] = w3[1];
       // averages: each sample is the mean over its own slot; points: trapezoid between neighbours
       if (r.avg) { const dv = aw * dt * dir; if (dir > 0) { z += (v + dv / 2) * dt; v += dv; } else if (prevA !== null) { const dv2 = prevA * dt * dir; z += (v + dv2 / 2) * dt * dir; v += dv2; } }
       else if (prevA !== null) { const am = (aw + prevA) / 2; const dv = am * dt * dir; z += (v + dv / 2) * dt * dir; v += dv; }
       A[k] = aw; V[k] = v; Z[k] = z; prevA = aw;
       // turn to the next sample (backward: undo this sample's turn)
       const w = [r.gx[i] - bias[0], r.gy[i] - bias[1], r.gz[i] - bias[2]];
-      if (dir > 0 && k < len - 1) { const w2 = [r.gx[i + 1] - bias[0], r.gy[i + 1] - bias[1], r.gz[i + 1] - bias[2]]; q = step(q, w.map((x, j) => (x + w2[j]) / 2), dt); }
-      if (dir < 0 && k < len - 1) { const w2 = [r.gx[i - 1] - bias[0], r.gy[i - 1] - bias[1], r.gz[i - 1] - bias[2]]; q = step(q, w.map((x, j) => -(x + w2[j]) / 2), dt); }
+      if (dir > 0 && k < len - 1) { const w2 = [r.gx[i + 1] - bias[0], r.gy[i + 1] - bias[1], r.gz[i + 1] - bias[2]]; q = step(q, w.map((x, j) => (gs * (x + w2[j])) / 2), dt); }
+      if (dir < 0 && k < len - 1) { const w2 = [r.gx[i - 1] - bias[0], r.gy[i - 1] - bias[1], r.gz[i - 1] - bias[2]]; q = step(q, w.map((x, j) => -(gs * (x + w2[j])) / 2), dt); }
     }
-    return { A, V, Z };
+    return { A, V, Z, AX, AY };
   }
   // orientation and gyro bias from a still stretch
   function restState(r, i0, i1, biasFrom) {
@@ -1290,7 +1296,81 @@ const PodEngine = (() => {
     };
   }
 
-  return { integrate, restState, G, analyzeJump, analyzeVault, stillMask, freeFalls, runs, fromGravity, rot, qmul, step };
+  // ---- the hip path through a whole vault: LiDAR + pod ----
+  // The LiDAR knows the run exactly (distance down the runway, 1000×/s) up to takeoff; the pod knows everything after
+  // (up, over, down) but drifts. So: integrate the pod backward from lying still on the mat (speed zero, height known),
+  // both up and along the runway, then pin it to the LiDAR at takeoff: the runway position there, and the running
+  // speed over the last strides (that sets the forward drift). Height before takeoff is pinned by "running level":
+  // over a couple of strides before takeoff the hips don't rise or fall on average.
+  //   o: { restHeight, iTO: the pod sample at the LiDAR's takeoff, xTO: runway position there (m, negative = before
+  //        the box), vRun: the LiDAR's running speed over the last 0.4 s before takeoff, lidarX(i): runway position at
+  //        pod sample i before takeoff (or null) }
+  function vaultPath(r, o) {
+    const still = runs(stillMask(r), Math.round(0.6 * r.hz)), rest = still.filter(([s]) => s > 0).pop();
+    if (!rest) return { ok: false, why: "Lie still on the mat for about a second after landing." };
+    const hz = r.hz, iTO = Math.round(o.iTO), i0 = Math.max(0, iTO - Math.round(1.5 * hz)), iR = rest[0];
+    if (!(iTO > i0 && iTO < iR)) return { ok: false, why: "The pod's recording doesn't line up with the run." };
+    const r1 = Math.min(rest[1], iR + Math.round(0.4 * hz)), st = restState(r, iR, r1, longest(still));
+    // The gyro's scale is off by up to ~1%: over the ~270° turn of a vault that tilts the pod's idea of "up" by a few
+    // degrees at takeoff, which leaks the big pole-phase accelerations into the forward direction. Running steadily,
+    // the average push the pod feels is straight up (plus the small speed-up the LiDAR measures), so pick the gyro
+    // scale that makes it so over the last strides before takeoff.
+    const wa = Math.max(i0, iTO - Math.round(0.6 * hz)), wb = Math.max(wa + 1, iTO - Math.round(0.05 * hz));
+    const tilt = (gs) => {
+      const J = integrate(r, iR, wa, -1, st.q, st.bias, 0, 0, st.g, 1, gs);
+      let mx = 0, my = 0, c = 0; for (let i = wa; i < wb; i++) { mx += J.AX[iR - i]; my += J.AY[iR - i]; c++; }
+      return Math.hypot(mx / c, my / c) - (o.aRun || 0);
+    };
+    let gs = 1;
+    if (o.gyroFit !== false) {
+      let a = 0.97, b = 1.03; const gr = (Math.sqrt(5) - 1) / 2;
+      let c1 = b - gr * (b - a), c2 = a + gr * (b - a), f1 = Math.abs(tilt(c1)), f2 = Math.abs(tilt(c2));
+      for (let it = 0; it < 18; it++) { if (f1 < f2) { b = c2; c2 = c1; f2 = f1; c1 = b - gr * (b - a); f1 = Math.abs(tilt(c1)); } else { a = c1; c1 = c2; f1 = f2; c2 = a + gr * (b - a); f2 = Math.abs(tilt(c2)); } }
+      gs = (a + b) / 2;
+    }
+    const I = integrate(r, iR, i0, -1, st.q, st.bias, 0, 0, st.g, 1, gs), L = I.V.length, dt = 1 / hz;
+    // back to forward order: index j = i - i0
+    const at = (arr, i) => arr[iR - i];
+    const tau = (i) => (iR - i) / hz;
+    // horizontal speed (world x/y), integrated backward from zero on the mat
+    const VX = new Float64Array(L), VY = new Float64Array(L);
+    for (let k = 1; k < L; k++) { VX[k] = VX[k - 1] - I.AX[k] * dt; VY[k] = VY[k - 1] - I.AY[k] * dt; }
+    // the last 0.4 s before takeoff: running direction, and the speed's error against the LiDAR
+    const w0 = Math.max(i0, iTO - Math.round(0.4 * hz)); let ux = 0, uy = 0, tw = 0;
+    for (let i = w0; i <= iTO; i++) { ux += at(VX, i); uy += at(VY, i); tw += tau(i); }
+    const un = Math.hypot(ux, uy) || 1; ux /= un; uy /= un;
+    const nW = iTO - w0 + 1, eF = (un / nW - o.vRun) / (tw / nW);          // forward speed error per second back from the mat
+    // height: running level over ~2 strides before takeoff (mean vertical speed ≈ 0) sets the vertical drift
+    const h0 = Math.max(i0, iTO - Math.round(1.2 * hz)), h1 = Math.max(h0 + 1, iTO - Math.round(0.3 * hz)); let vm = 0, tm = 0;
+    for (let i = h0; i < h1; i++) { vm += at(I.V, i); tm += tau(i); }
+    const eZ = o.levelFix ? vm / tm : 0;
+    // corrected forward speed and vertical speed, forward order
+    const n = iR - i0 + 1, F = new Float64Array(n), VZ = new Float64Array(n);
+    for (let j = 0; j < n; j++) { const i = i0 + j, T = tau(i); F[j] = at(VX, i) * ux + at(VY, i) * uy - eF * T; VZ[j] = at(I.V, i) - eZ * T; }
+    // forward from takeoff too (LiDAR speed at takeoff, the pod's forward acceleration): good near takeoff, drifting
+    // later; the backward one is good near the mat. Blend: trust the forward one early, the backward one late.
+    if (o.vTO != null && o.blend !== false) {
+      const Fb = F.slice(), Ff = new Float64Array(n), jT = iTO - i0; Ff[jT] = o.vTO;
+      const af = (j) => -(at(I.AX, i0 + j) * ux + at(I.AY, i0 + j) * uy);   // (I.AX is the world acceleration; minus: see below)
+      for (let j = jT + 1; j < n; j++) Ff[j] = Ff[j - 1] + (at(I.AX, i0 + j) * ux + at(I.AY, i0 + j) * uy) * dt;
+      const span = n - 1 - jT, pw = o.blendPow || 1;
+      for (let j = jT; j < n; j++) { const w = Math.pow(1 - (j - jT) / span, pw); F[j] = w * Ff[j] + (1 - w) * Fb[j]; }
+      if (o.blend === "fwd") for (let j = jT; j < n; j++) F[j] = Ff[j];
+      if (o.blend === "back") for (let j = jT; j < n; j++) F[j] = Fb[j];
+    }
+    // positions: height from the mat back (rest height), runway position from the LiDAR at takeoff, forward
+    const X = new Float64Array(n), Z = new Float64Array(n);
+    Z[n - 1] = o.restHeight;
+    for (let j = n - 2; j >= 0; j--) Z[j] = Z[j + 1] - (VZ[j] + VZ[j + 1]) / 2 * dt;
+    const jTO = iTO - i0; X[jTO] = o.xTO;
+    for (let j = jTO + 1; j < n; j++) X[j] = X[j - 1] + (F[j - 1] + F[j]) / 2 * dt;
+    for (let j = jTO - 1; j >= 0; j--) { const lx = o.lidarX ? o.lidarX(i0 + j) : null; X[j] = lx != null ? lx : X[j + 1] - (F[j] + F[j + 1]) / 2 * dt; }
+    let jP = jTO; for (let j = jTO; j < n; j++) if (Z[j] > Z[jP]) jP = j;
+    return { ok: true, hz, i0, iTO, iRest: iR, gyroScale: gs, x: Array.from(X), z: Array.from(Z), v: Array.from(F),
+      peak: { z: Z[jP], x: X[jP], t: (jP - jTO) / hz, j: jP }, takeoff: { x: X[jTO], z: Z[jTO], j: jTO }, land: { x: X[n - 1] } };
+  }
+
+  return { vaultPath, integrate, restState, G, analyzeJump, analyzeVault, stillMask, freeFalls, runs, fromGravity, rot, qmul, step };
 })();
 if (typeof module !== "undefined") module.exports = PodEngine;
 
@@ -1330,24 +1410,24 @@ const PodSim = (() => {
     const out = rawRecord({ dur, hip, xs, phi, bounce, breathe, off, hz: hz * over, err });
     if (over === 1) return out;
     // what the pod sends: the mean of each `over` readings (truth height: the slot's middle)
-    const m = { hz, avg: true, ax: [], ay: [], az: [], gx: [], gy: [], gz: [], podZ: [] };
+    const m = { hz, avg: true, ax: [], ay: [], az: [], gx: [], gy: [], gz: [], podZ: [], podX: [] };
     for (let i = 0; i + over <= out.ax.length; i += over) for (const k of ["ax", "ay", "az", "gx", "gy", "gz"]) { let s = 0; for (let j = 0; j < over; j++) s += out[k][i + j]; m[k].push(s / over); }
-    for (let i = 0; i + over <= out.ax.length; i += over) m.podZ.push(out.podZ[i]);
+    for (let i = 0; i + over <= out.ax.length; i += over) { m.podZ.push(out.podZ[i]); m.podX.push(out.podX[i]); }
     return m;
   }
   function rawRecord({ dur, hip, xs, phi, bounce, breathe, off, hz, err }) {
-    const N = Math.round(dur * hz), out = { hz, ax: [], ay: [], az: [], gx: [], gy: [], gz: [], podZ: [] };
+    const N = Math.round(dur * hz), out = { hz, ax: [], ay: [], az: [], gx: [], gy: [], gz: [], podZ: [], podX: [] };
     // the chip sits a few degrees off on its board and in the pod: a fixed tilt the math must not care about
     const m = err.mount;
     for (let i = 0; i < N; i++) {
-      const t = i / hz, [z, vz, az0] = hip(t), [, , ax0] = xs(t);
+      const t = i / hz, [z, vz, az0] = hip(t), [x0, , ax0] = xs(t);
       let [p, dp, ddp] = phi(t);
       let zb = 0, azb = 0; if (bounce) [zb, azb] = bounce(t);
       if (breathe) { const [bz, baz, bp, bdp, bddp] = breathe(t); zb += bz; azb += baz; p += bp; dp += bdp; ddp += bddp; }
       // pod position and acceleration: hip + off·n(phi), n = (cos φ, sin φ)
       const c = Math.cos(p), s = Math.sin(p);
       const aX = ax0 + off * (-s * ddp - c * dp * dp), aZ = az0 + azb + off * (c * ddp - s * dp * dp);
-      out.podZ.push(z + zb + off * s);
+      out.podZ.push(z + zb + off * s); out.podX.push(x0 + off * c);
       // what the accelerometer feels (world): motion plus gravity's push-back
       const f = [aX, 0, aZ + G];
       // pod axes (world): x along the strap (sideways), y toward the head, z out of the body
@@ -1424,7 +1504,18 @@ const PodSim = (() => {
     r.calibrated = true;
     return { rec: r, rest: r.podZ[r.podZ.length - 1], truth: V.truth.zPeak };
   }
-  return { path, setGyroSign: (s) => (GYRO_SIGN = s), record, jump, vault, chipErrors, setSeed: (v) => (seed = v), gauss, simJump, simVault };
+  // a vault with the LiDAR too: the pod recording, what the LiDAR's run curve would hold (time from the run's
+  // start, distance from the start, speed) and the truth (the pod's own path, x past the box, z up)
+  function simVaultLidar(speed = 9, s = 7, o = {}) {
+    seed = s % 2147483646 + 1;
+    const zRel = 4.2 + Math.max(-0.6, Math.min(0.9, (speed - 8.3) * 0.35)) + 0.1 * gauss(), vRel = 0.4 + 0.8 * rnd();
+    const V = vault(zRel, vRel, 0.8), r = record({ ...V, err: chipErrors(o.cal !== false) }); r.calibrated = o.cal !== false;
+    const BOX = 30.8, tGo = 0;               // the sim's run is already at speed from t = 0: call that the start
+    const lid = { t: [], d: [], v: [] };
+    for (let t = 0; t <= 3.25; t += 0.02) { const [x, v] = V.xs(t); lid.t.push(+t.toFixed(3)); lid.d.push(x + 0.005 * gauss()); lid.v.push(v); }
+    return { rec: r, rest: r.podZ[r.podZ.length - 1], lidar: lid, box: BOX, tTO: 3.0, truth: { x: r.podX.map((x) => x - BOX), z: r.podZ, zPeak: V.truth.zPeak } };
+  }
+  return { simVaultLidar, path, setGyroSign: (s) => (GYRO_SIGN = s), record, jump, vault, chipErrors, setSeed: (v) => (seed = v), gauss, simJump, simVault };
 })();
 if (typeof module !== "undefined") module.exports = PodSim;
 
@@ -2585,6 +2676,7 @@ function resultsHTML(run) {
     h += cardHTML("Approach", f2(R.approachTime), "s", `${f1(R.approachDist)} m to takeoff`);
     if (R.pod) h += R.pod.error ? cardHTML("Peak hip height ≈", "—", "", esc(R.pod.error)) : cardHTML("Peak hip height ≈", ftLabel(R.pod.peak / FT), "", `${R.pod.peak.toFixed(2)} m · waist pod${R.pod.sim ? " (simulated)" : R.pod.cal ? "" : " (not calibrated)"}${R.pod.note ? " · " + esc(R.pod.note) : ""}`);
     else if (!(SETUPS[run.setup] || {}).pole) h += cardHTML("Peak hip height ≈", "—", "", "Wear a waist pod to measure it");
+    if (R.pod && R.pod.path) h += hipPathHTML(R.pod.path, R.pod.sim);
     h += `</div>`;
   }
   if (run.mode === "vault") h += leftsCardHTML(run);
@@ -2817,12 +2909,15 @@ const podRest = () => settings.podRest || 1.0;   // the pod's height off the gro
 function parsePod(buf) {
   const dv = new DataView(buf);
   if (buf.byteLength < 32 || String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)) !== "POD1") return null;
+  const ver = dv.getUint16(4, true), H = ver >= 2 ? 40 : 32;
   const hz = dv.getUint16(6, true), n = dv.getUint32(8, true), seq = dv.getUint32(12, true), flags = dv.getUint32(16, true);
   const aL = dv.getFloat32(20, true), gL = dv.getFloat32(24, true);
   const r = { hz, seq, avg: !!(flags & 2), calibrated: !!(flags & 1), ax: [], ay: [], az: [], gx: [], gy: [], gz: [] };
-  const m = Math.min(n, Math.floor((buf.byteLength - 32) / 12));
+  // version 2: the pod's micros() at the last sample, and its measured rate (the chip's clock can be ~1% off)
+  if (ver >= 2) { r.lastUs = dv.getUint32(32, true); const rate = dv.getFloat32(36, true); if (Math.abs(rate / hz - 1) < 0.05) r.hz = rate; }
+  const m = Math.min(n, Math.floor((buf.byteLength - H) / 12));
   for (let i = 0; i < m; i++) {
-    const o = 32 + i * 12;
+    const o = H + i * 12;
     r.ax.push(dv.getInt16(o, true) * aL); r.ay.push(dv.getInt16(o + 2, true) * aL); r.az.push(dv.getInt16(o + 4, true) * aL);
     r.gx.push(dv.getInt16(o + 6, true) * gL); r.gy.push(dv.getInt16(o + 8, true) * gL); r.gz.push(dv.getInt16(o + 10, true) * gL);
   }
@@ -2899,8 +2994,10 @@ function podMessage(m, id) {
 async function podFetch(id) {
   const st = pst(id); st.busy = true; pod.focus = id; if (view === "jump") render();
   try {
-    const rec = parsePod(await (await fetch(`/pod/data?id=${encodeURIComponent(id)}`, { cache: "no-store" })).arrayBuffer());
+    const resp = await fetch(`/pod/data?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+    const rec = parsePod(await resp.arrayBuffer());
     if (!rec) return;
+    const off = resp.headers.get("X-Pod-Off"); if (off != null && off !== "") rec.off = Number(off) >>> 0;   // sensor µs − pod µs
     pod.last = rec;
     if (view === "jump") podJump(rec, false, id); else podVault(rec);
   } catch (e) {} finally { st.busy = false; }
@@ -2930,6 +3027,61 @@ function simPodPeak(run) {
   if ((SETUPS[run.setup] || {}).pole || !run.res) return;
   const sp = (run.res.last5 && run.res.last5.speed) || 8.3, S = PodSim.simVault(sp), R = PodEngine.analyzeVault(S.rec, S.rest);
   run.res.pod = R.ok ? { peak: R.peak, impact: R.impactSpeed, flight: R.flightTime, note: R.note, cal: true, sim: true } : { error: R.why };
+  // and a simulated hip path (its own simulated LiDAR run, lined up exactly)
+  try {
+    const V = PodSim.simVaultLidar(sp, Math.floor(Math.random() * 1e9)), hz = V.rec.hz, L = V.lidar;
+    const xAt = (t) => { if (t < 0 || t > L.t[L.t.length - 1]) return null; let j = 0; while (j < L.t.length - 2 && L.t[j + 1] < t) j++; const f = (t - L.t[j]) / (L.t[j + 1] - L.t[j]); return L.d[j] + f * (L.d[j + 1] - L.d[j]) - V.box; };
+    let vRun = 0, c = 0; for (let k = 0; k < L.t.length; k++) if (L.t[k] >= V.tTO - 0.4 && L.t[k] <= V.tTO) { vRun += L.v[k]; c++; }
+    const P = PodEngine.vaultPath(V.rec, { restHeight: V.rest, iTO: V.tTO * hz, xTO: xAt(V.tTO), vRun: vRun / c, lidarX: (i) => (i / hz <= V.tTO ? xAt(i / hz) : null) });
+    if (P.ok && run.res.pod.peak) { run.res.pod.path = pathKeep(P); run.res.pod.peak = P.peak.z; }
+  } catch (e) {}
+}
+// the hip path, side on: run-up (LiDAR + pod), takeoff, up the pole, over, down to the mat. Box at 0.
+function hipPathHTML(P, sim) {
+  const xs = P.x, zs = P.z, n = xs.length, j0 = Math.max(0, xs.findIndex((x) => x > -6.5));
+  const xMin = -6.5, xMax = Math.max(4, Math.max(...xs.slice(j0)) + 0.6), zMax = Math.max(5, P.peak.z + 0.6);
+  const W = 640, H = Math.round(W * (zMax / (xMax - xMin)) * 1.0), pl = 26, pb = 22, pt = 10, pr = 10;
+  const sx = (x) => pl + ((x - xMin) / (xMax - xMin)) * (W - pl - pr), sz = (z) => H - pb - (z / zMax) * (H - pb - pt);
+  const seg = (a, b) => xs.slice(a, b + 1).map((x, k) => `${sx(x).toFixed(1)},${sz(zs[a + k]).toFixed(1)}`).join(" ");
+  const mat = Math.max(0.3, podRest() - 0.15);
+  let g = "";
+  for (let x = Math.ceil(xMin); x <= xMax; x++) g += `<line x1="${sx(x)}" x2="${sx(x)}" y1="${pt}" y2="${H - pb}" class="hp-grid"/>${x % 2 === 0 ? `<text x="${sx(x)}" y="${H - 6}" class="hp-t" text-anchor="middle">${x === 0 ? "box" : x + " m"}</text>` : ""}`;
+  for (let z = 1; z < zMax; z++) g += `<line x1="${pl}" x2="${W - pr}" y1="${sz(z)}" y2="${sz(z)}" class="hp-grid"/><text x="${pl - 4}" y="${sz(z) + 4}" class="hp-t" text-anchor="end">${z}</text>`;
+  const pk = P.jPeak, to = P.jTO;
+  const svg = `<svg viewBox="0 0 ${W} ${H}" class="hp" role="img" aria-label="Hip path through the vault">
+    <defs><linearGradient id="hpG" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="var(--pink)"/><stop offset=".55" stop-color="var(--purple)"/><stop offset="1" stop-color="var(--blue)"/></linearGradient></defs>
+    ${g}<line x1="${pl}" x2="${W - pr}" y1="${sz(0)}" y2="${sz(0)}" class="hp-ground"/>
+    <rect x="${sx(0.3)}" y="${sz(mat)}" width="${sx(xMax) - sx(0.3)}" height="${sz(0) - sz(mat)}" rx="4" class="hp-mat"/>
+    <path d="M${sx(-0.55)},${sz(0)} L${sx(0)},${sz(-0.01) + 6} L${sx(0)},${sz(0)}" class="hp-box"/>
+    <polyline points="${seg(j0, to)}" class="hp-run"/><polyline points="${seg(to, n - 1)}" class="hp-air" stroke="url(#hpG)"/>
+    <circle cx="${sx(xs[to])}" cy="${sz(zs[to])}" r="5" class="hp-dot"/><text x="${sx(xs[to])}" y="${sz(zs[to]) + 20}" class="hp-l" text-anchor="middle">takeoff</text>
+    <circle cx="${sx(P.peak.x)}" cy="${sz(P.peak.z)}" r="6" class="hp-pk"/><text x="${sx(P.peak.x)}" y="${sz(P.peak.z) - 12}" class="hp-l hp-big" text-anchor="middle">${P.peak.z.toFixed(2)} m</text>
+  </svg>`;
+  const past = P.peak.x, toX = xs[to];
+  return `<div class="card" style="grid-column:1/-1"><div class="between"><div class="label">Hip path${sim ? " · simulated" : ""}</div><span class="small muted">metres · box at 0</span></div>${svg}
+    <div class="small muted" style="margin-top:6px">Highest at <b style="color:var(--text)">${P.peak.z.toFixed(2)} m</b>, ${Math.abs(past).toFixed(2)} m ${past >= 0 ? "past" : "before"} the box · takeoff ${Math.abs(toX).toFixed(2)} m out. Grey: the run-up (LiDAR), colour: off the ground (waist pod).</div></div>`;
+}
+// keep a path small: 50 points a second, mm
+function pathKeep(P) {
+  const step = Math.max(1, Math.round(P.hz / 50)), x = [], z = [];
+  for (let j = 0; j < P.x.length; j += step) { x.push(+P.x[j].toFixed(3)); z.push(+P.z[j].toFixed(3)); }
+  return { dt: step / P.hz, x, z, jTO: Math.round(P.takeoff.j / step), jPeak: Math.round(P.peak.j / step), peak: { x: +P.peak.x.toFixed(3), z: +P.peak.z.toFixed(3) }, gs: +P.gyroScale.toFixed(4) };
+}
+// the real thing: line the pod's recording up with the LiDAR's run (both on the sensor's clock) and fuse them
+function podPath(rec, run) {
+  const R = run.res;
+  if (rec.lastUs == null || rec.off == null || R.us0 == null || !R.takeoff || R.box == null || !R.curve) return null;
+  const N = rec.ax.length, hz = rec.hz, endUs = (rec.lastUs + rec.off) >>> 0;
+  // run time (s from the run's start) ↔ pod sample index
+  const iAt = (t) => N - 1 - (((endUs - ((R.us0 + Math.round(t * 1e6)) >>> 0)) | 0) * hz) / 1e6;
+  const tAt = (i) => (((((endUs - Math.round(((N - 1 - i) * 1e6) / hz)) >>> 0) - R.us0) | 0) / 1e6);
+  const C = R.curve, box = R.box, d0 = R.start.d, tTO = R.takeoff.t;
+  const xAt = (t) => { if (t < C.t[0] || t > tTO) return null; let j = 0; while (j < C.t.length - 2 && C.t[j + 1] < t) j++; const f = (t - C.t[j]) / ((C.t[j + 1] - C.t[j]) || 1e-9); return C.d[j] + f * (C.d[j + 1] - C.d[j]) + d0 - box; };
+  let vRun = 0, c = 0; for (let k = 0; k < C.t.length; k++) if (C.t[k] >= tTO - 0.4 && C.t[k] <= tTO) { vRun += C.v[k]; c++; }
+  if (!c) return null;
+  const iTO = iAt(tTO); if (!(iTO > hz && iTO < N - hz)) return null;
+  const P = PodEngine.vaultPath(rec, { restHeight: podRest(), iTO, xTO: R.takeoff.sensor - box, vRun: vRun / c, lidarX: (i) => xAt(tAt(i)) });
+  return P.ok ? pathKeep(P) : null;
 }
 function podVault(rec) {
   // the latest vault run on the runway (not a pole run: that has no pit landing), finished within the last 90 s
@@ -2937,6 +3089,7 @@ function podVault(rec) {
   if (!cand) return;
   const R = PodEngine.analyzeVault(rec, podRest());
   cand.res.pod = R.ok ? { peak: R.peak, impact: R.impactSpeed, flight: R.flightTime, note: R.note, cal: rec.calibrated } : { error: R.why };
+  if (R.ok) { try { const P = podPath(rec, cand); if (P) { cand.res.pod.path = P; cand.res.pod.peak = P.peak.z; } } catch (e) {} }
   if (runs.includes(cand)) saveRuns();
   toast(R.ok ? `Peak hip height ${ftLabel(R.peak / FT)} (${R.peak.toFixed(2)} m)` : `Waist pod: ${R.why}`);
   render();

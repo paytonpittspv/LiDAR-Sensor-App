@@ -68,21 +68,21 @@ const PodEngine = (() => {
   // ---- integrate the vertical motion from sample i0 to i1 (dir +1 forward, -1 backward) ----
   // q0: orientation at i0; bias: gyro bias. Returns per-sample vertical acceleration, velocity and height (world z),
   // relative to the starting values v0 / z0.
-  function integrate(r, i0, i1, dir, q0, bias, v0 = 0, z0 = 0, g = G, scale = 1) {
-    const dt = 1 / r.hz, len = Math.abs(i1 - i0) + 1, A = new Float64Array(len), V = new Float64Array(len), Z = new Float64Array(len);
+  function integrate(r, i0, i1, dir, q0, bias, v0 = 0, z0 = 0, g = G, scale = 1, gs = 1) {
+    const dt = 1 / r.hz, len = Math.abs(i1 - i0) + 1, A = new Float64Array(len), V = new Float64Array(len), Z = new Float64Array(len), AX = new Float64Array(len), AY = new Float64Array(len);
     let q = q0, v = v0, z = z0, prevA = null;
     for (let k = 0, i = i0; k < len; k++, i += dir) {
-      const aw = rot(q, [r.ax[i] * scale, r.ay[i] * scale, r.az[i] * scale])[2] - g;
+      const w3 = rot(q, [r.ax[i] * scale, r.ay[i] * scale, r.az[i] * scale]), aw = w3[2] - g; AX[k] = w3[0]; AY[k] = w3[1];
       // averages: each sample is the mean over its own slot; points: trapezoid between neighbours
       if (r.avg) { const dv = aw * dt * dir; if (dir > 0) { z += (v + dv / 2) * dt; v += dv; } else if (prevA !== null) { const dv2 = prevA * dt * dir; z += (v + dv2 / 2) * dt * dir; v += dv2; } }
       else if (prevA !== null) { const am = (aw + prevA) / 2; const dv = am * dt * dir; z += (v + dv / 2) * dt * dir; v += dv; }
       A[k] = aw; V[k] = v; Z[k] = z; prevA = aw;
       // turn to the next sample (backward: undo this sample's turn)
       const w = [r.gx[i] - bias[0], r.gy[i] - bias[1], r.gz[i] - bias[2]];
-      if (dir > 0 && k < len - 1) { const w2 = [r.gx[i + 1] - bias[0], r.gy[i + 1] - bias[1], r.gz[i + 1] - bias[2]]; q = step(q, w.map((x, j) => (x + w2[j]) / 2), dt); }
-      if (dir < 0 && k < len - 1) { const w2 = [r.gx[i - 1] - bias[0], r.gy[i - 1] - bias[1], r.gz[i - 1] - bias[2]]; q = step(q, w.map((x, j) => -(x + w2[j]) / 2), dt); }
+      if (dir > 0 && k < len - 1) { const w2 = [r.gx[i + 1] - bias[0], r.gy[i + 1] - bias[1], r.gz[i + 1] - bias[2]]; q = step(q, w.map((x, j) => (gs * (x + w2[j])) / 2), dt); }
+      if (dir < 0 && k < len - 1) { const w2 = [r.gx[i - 1] - bias[0], r.gy[i - 1] - bias[1], r.gz[i - 1] - bias[2]]; q = step(q, w.map((x, j) => -(gs * (x + w2[j])) / 2), dt); }
     }
-    return { A, V, Z };
+    return { A, V, Z, AX, AY };
   }
   // orientation and gyro bias from a still stretch
   function restState(r, i0, i1, biasFrom) {
@@ -187,6 +187,80 @@ const PodEngine = (() => {
     };
   }
 
-  return { integrate, restState, G, analyzeJump, analyzeVault, stillMask, freeFalls, runs, fromGravity, rot, qmul, step };
+  // ---- the hip path through a whole vault: LiDAR + pod ----
+  // The LiDAR knows the run exactly (distance down the runway, 1000×/s) up to takeoff; the pod knows everything after
+  // (up, over, down) but drifts. So: integrate the pod backward from lying still on the mat (speed zero, height known),
+  // both up and along the runway, then pin it to the LiDAR at takeoff: the runway position there, and the running
+  // speed over the last strides (that sets the forward drift). Height before takeoff is pinned by "running level":
+  // over a couple of strides before takeoff the hips don't rise or fall on average.
+  //   o: { restHeight, iTO: the pod sample at the LiDAR's takeoff, xTO: runway position there (m, negative = before
+  //        the box), vRun: the LiDAR's running speed over the last 0.4 s before takeoff, lidarX(i): runway position at
+  //        pod sample i before takeoff (or null) }
+  function vaultPath(r, o) {
+    const still = runs(stillMask(r), Math.round(0.6 * r.hz)), rest = still.filter(([s]) => s > 0).pop();
+    if (!rest) return { ok: false, why: "Lie still on the mat for about a second after landing." };
+    const hz = r.hz, iTO = Math.round(o.iTO), i0 = Math.max(0, iTO - Math.round(1.5 * hz)), iR = rest[0];
+    if (!(iTO > i0 && iTO < iR)) return { ok: false, why: "The pod's recording doesn't line up with the run." };
+    const r1 = Math.min(rest[1], iR + Math.round(0.4 * hz)), st = restState(r, iR, r1, longest(still));
+    // The gyro's scale is off by up to ~1%: over the ~270° turn of a vault that tilts the pod's idea of "up" by a few
+    // degrees at takeoff, which leaks the big pole-phase accelerations into the forward direction. Running steadily,
+    // the average push the pod feels is straight up (plus the small speed-up the LiDAR measures), so pick the gyro
+    // scale that makes it so over the last strides before takeoff.
+    const wa = Math.max(i0, iTO - Math.round(0.6 * hz)), wb = Math.max(wa + 1, iTO - Math.round(0.05 * hz));
+    const tilt = (gs) => {
+      const J = integrate(r, iR, wa, -1, st.q, st.bias, 0, 0, st.g, 1, gs);
+      let mx = 0, my = 0, c = 0; for (let i = wa; i < wb; i++) { mx += J.AX[iR - i]; my += J.AY[iR - i]; c++; }
+      return Math.hypot(mx / c, my / c) - (o.aRun || 0);
+    };
+    let gs = 1;
+    if (o.gyroFit !== false) {
+      let a = 0.97, b = 1.03; const gr = (Math.sqrt(5) - 1) / 2;
+      let c1 = b - gr * (b - a), c2 = a + gr * (b - a), f1 = Math.abs(tilt(c1)), f2 = Math.abs(tilt(c2));
+      for (let it = 0; it < 18; it++) { if (f1 < f2) { b = c2; c2 = c1; f2 = f1; c1 = b - gr * (b - a); f1 = Math.abs(tilt(c1)); } else { a = c1; c1 = c2; f1 = f2; c2 = a + gr * (b - a); f2 = Math.abs(tilt(c2)); } }
+      gs = (a + b) / 2;
+    }
+    const I = integrate(r, iR, i0, -1, st.q, st.bias, 0, 0, st.g, 1, gs), L = I.V.length, dt = 1 / hz;
+    // back to forward order: index j = i - i0
+    const at = (arr, i) => arr[iR - i];
+    const tau = (i) => (iR - i) / hz;
+    // horizontal speed (world x/y), integrated backward from zero on the mat
+    const VX = new Float64Array(L), VY = new Float64Array(L);
+    for (let k = 1; k < L; k++) { VX[k] = VX[k - 1] - I.AX[k] * dt; VY[k] = VY[k - 1] - I.AY[k] * dt; }
+    // the last 0.4 s before takeoff: running direction, and the speed's error against the LiDAR
+    const w0 = Math.max(i0, iTO - Math.round(0.4 * hz)); let ux = 0, uy = 0, tw = 0;
+    for (let i = w0; i <= iTO; i++) { ux += at(VX, i); uy += at(VY, i); tw += tau(i); }
+    const un = Math.hypot(ux, uy) || 1; ux /= un; uy /= un;
+    const nW = iTO - w0 + 1, eF = (un / nW - o.vRun) / (tw / nW);          // forward speed error per second back from the mat
+    // height: running level over ~2 strides before takeoff (mean vertical speed ≈ 0) sets the vertical drift
+    const h0 = Math.max(i0, iTO - Math.round(1.2 * hz)), h1 = Math.max(h0 + 1, iTO - Math.round(0.3 * hz)); let vm = 0, tm = 0;
+    for (let i = h0; i < h1; i++) { vm += at(I.V, i); tm += tau(i); }
+    const eZ = o.levelFix ? vm / tm : 0;
+    // corrected forward speed and vertical speed, forward order
+    const n = iR - i0 + 1, F = new Float64Array(n), VZ = new Float64Array(n);
+    for (let j = 0; j < n; j++) { const i = i0 + j, T = tau(i); F[j] = at(VX, i) * ux + at(VY, i) * uy - eF * T; VZ[j] = at(I.V, i) - eZ * T; }
+    // forward from takeoff too (LiDAR speed at takeoff, the pod's forward acceleration): good near takeoff, drifting
+    // later; the backward one is good near the mat. Blend: trust the forward one early, the backward one late.
+    if (o.vTO != null && o.blend !== false) {
+      const Fb = F.slice(), Ff = new Float64Array(n), jT = iTO - i0; Ff[jT] = o.vTO;
+      const af = (j) => -(at(I.AX, i0 + j) * ux + at(I.AY, i0 + j) * uy);   // (I.AX is the world acceleration; minus: see below)
+      for (let j = jT + 1; j < n; j++) Ff[j] = Ff[j - 1] + (at(I.AX, i0 + j) * ux + at(I.AY, i0 + j) * uy) * dt;
+      const span = n - 1 - jT, pw = o.blendPow || 1;
+      for (let j = jT; j < n; j++) { const w = Math.pow(1 - (j - jT) / span, pw); F[j] = w * Ff[j] + (1 - w) * Fb[j]; }
+      if (o.blend === "fwd") for (let j = jT; j < n; j++) F[j] = Ff[j];
+      if (o.blend === "back") for (let j = jT; j < n; j++) F[j] = Fb[j];
+    }
+    // positions: height from the mat back (rest height), runway position from the LiDAR at takeoff, forward
+    const X = new Float64Array(n), Z = new Float64Array(n);
+    Z[n - 1] = o.restHeight;
+    for (let j = n - 2; j >= 0; j--) Z[j] = Z[j + 1] - (VZ[j] + VZ[j + 1]) / 2 * dt;
+    const jTO = iTO - i0; X[jTO] = o.xTO;
+    for (let j = jTO + 1; j < n; j++) X[j] = X[j - 1] + (F[j - 1] + F[j]) / 2 * dt;
+    for (let j = jTO - 1; j >= 0; j--) { const lx = o.lidarX ? o.lidarX(i0 + j) : null; X[j] = lx != null ? lx : X[j + 1] - (F[j] + F[j + 1]) / 2 * dt; }
+    let jP = jTO; for (let j = jTO; j < n; j++) if (Z[j] > Z[jP]) jP = j;
+    return { ok: true, hz, i0, iTO, iRest: iR, gyroScale: gs, x: Array.from(X), z: Array.from(Z), v: Array.from(F),
+      peak: { z: Z[jP], x: X[jP], t: (jP - jTO) / hz, j: jP }, takeoff: { x: X[jTO], z: Z[jTO], j: jTO }, land: { x: X[n - 1] } };
+  }
+
+  return { vaultPath, integrate, restState, G, analyzeJump, analyzeVault, stillMask, freeFalls, runs, fromGravity, rot, qmul, step };
 })();
 if (typeof module !== "undefined") module.exports = PodEngine;
