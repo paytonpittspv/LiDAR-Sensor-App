@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="LiDAR Sensor">
@@ -37,6 +37,10 @@
   --pink:#e0147a;--purple:#7444e8;--blue:#0f8fd6;--good:#13a35f;--bad:#d62650;--on:#17142c;--on-ink:#ffffff;color-scheme:light}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+/* the app is a fixed size: no pinch zoom, no double-tap zoom, no sideways drift, no bounce past the edges.
+   iPhone Safari ignores user-scalable=no, so touch-action and the gesture handlers in app.js do the real work. */
+html,body{touch-action:pan-x pan-y;overscroll-behavior:none;overflow-x:clip;max-width:100%}
+input,select,textarea{font-size:16px}   /* under 16px, iOS zooms the page when a field gets focus */
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:15px;line-height:1.45}
 button,input,select{font:inherit;color:inherit}
 .top{position:sticky;top:0;z-index:20;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -5259,6 +5263,11 @@ document.addEventListener("click", (e) => {
 });
 
 
+// ---------------- no zooming: the app is a fixed size ----------------
+for (const ev of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });   // Safari pinch
+document.addEventListener("touchmove", (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });                              // two-finger pinch
+document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });                                               // trackpad pinch, ctrl + wheel
+document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && ["+", "-", "=", "0"].includes(e.key)) e.preventDefault(); });
 // ---------------- start ----------------
 document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 render(); pollLoop();

@@ -2835,6 +2835,11 @@ function addDemoData() {
 // ---------------- printable report ----------------
 /*__REPORT__*/
 
+// ---------------- no zooming: the app is a fixed size ----------------
+for (const ev of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });   // Safari pinch
+document.addEventListener("touchmove", (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });                              // two-finger pinch
+document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });                                               // trackpad pinch, ctrl + wheel
+document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && ["+", "-", "=", "0"].includes(e.key)) e.preventDefault(); });
 // ---------------- start ----------------
 document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 render(); pollLoop();
