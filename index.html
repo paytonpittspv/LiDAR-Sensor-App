@@ -529,6 +529,7 @@ html.disp-on,html.disp-on body{overflow:hidden}
 /* level & aim */
 .lv-card{display:flex;align-items:center;gap:16px}
 .lv-bubble{width:42%;max-width:170px;flex:none}
+#lvDot{transition:cx .25s linear,cy .25s linear}
 .lv-read{min-width:0}
 .lv-num{font-family:var(--display);font-weight:800;font-size:clamp(44px,13vw,64px);line-height:1;font-variant-numeric:tabular-nums}
 .lv-word{font-family:var(--display);font-weight:800;font-size:22px;text-transform:uppercase;letter-spacing:.5px;margin:2px 0 4px}
@@ -2205,14 +2206,14 @@ function drawDisplay() {
     // the digital level (the controller has Level & aim open): bubble, nose angle, where the beam ends up
     if (!j.lvOk) { st = strip("d-amber", "LEVEL"); body = `<div class="d-center"><div class="d-xl d-ambert">NO TILT SENSOR</div><div class="d-sub">Check the BMI160\u2019s four wires.</div></div>`; }
     else {
-      const p = j.lvP || 0, ap = Math.abs(p), col = ap < 0.1 ? "green" : ap < 0.4 ? "amber" : "red", cssCol = { green: "#1fd17b", amber: "#ffb020", red: "#ff4d4d" }[col];
-      let bx = (j.lvR || 0) * 22, by = -p * 22; const L = Math.hypot(bx, by), lim = 37; if (L > lim) { bx *= lim / L; by *= lim / L; }
-      const off = (j.lvAt || 30.48) * Math.tan((p * Math.PI) / 180) * 100, at = j.vault ? `${((j.lvAt || 30.48) * 3.28084).toFixed(0)} FT` : `${(j.lvAt || 30.48).toFixed(0)} M`;
-      st = strip(col === "green" ? "d-green" : col === "amber" ? "d-amber" : "d-red", ap < 0.1 ? "LEVEL \u00b7 GOOD" : "LEVEL", "");
+      const p = j.lvP || 0, ap = Math.abs(p), col = ap < 0.2 ? "green" : ap < 0.6 ? "amber" : "red", cssCol = { green: "#1fd17b", amber: "#ffb020", red: "#ff4d4d" }[col];
+      let bx = (j.lvR || 0) * 12, by = -p * 12; const L = Math.hypot(bx, by), lim = 37; if (L > lim) { bx *= lim / L; by *= lim / L; }
+      const off = Math.round(((j.lvAt || 30.48) * Math.tan((p * Math.PI) / 180) * 100) / 5) * 5, at = j.vault ? `${((j.lvAt || 30.48) * 3.28084).toFixed(0)} FT` : `${(j.lvAt || 30.48).toFixed(0)} M`;
+      st = strip(col === "green" ? "d-green" : col === "amber" ? "d-amber" : "d-red", ap < 0.2 ? "LEVEL \u00b7 GOOD" : "LEVEL", "");
       body = `<div class="d-level"><svg viewBox="-50 -50 100 100" class="d-bub"><circle r="46" class="lb-ring"/><circle r="6.5" class="lb-ring"/><line x1="-42" x2="42" class="lb-ring"/><line y1="-42" y2="42" class="lb-ring"/><circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="8" fill="${cssCol}"/></svg>
-        <div class="d-lread"><div class="d-label">NOSE</div><div class="d-num" style="color:${cssCol}">${ap < 0.005 ? "0.00" : (p > 0 ? "+" : "\u2212") + ap.toFixed(2)}<small>\u00b0</small></div>
-          <div class="d-lword" style="color:${cssCol}">${ap < 0.1 ? "LEVEL" : p > 0 ? "NOSE UP" : "NOSE DOWN"}</div>
-          <div class="d-label" style="margin-top:2vh">BEAM AT ${at}</div><div class="d-cell">${Math.abs(off) < 1 ? "on height" : `${Math.abs(off).toFixed(0)} cm ${off > 0 ? "high" : "low"}`}</div>
+        <div class="d-lread"><div class="d-label">NOSE</div><div class="d-num" style="color:${cssCol}">${ap < 0.05 ? "0.0" : (p > 0 ? "+" : "\u2212") + ap.toFixed(1)}<small>\u00b0</small></div>
+          <div class="d-lword" style="color:${cssCol}">${ap < 0.2 ? "LEVEL" : p > 0 ? "NOSE UP" : "NOSE DOWN"}</div>
+          <div class="d-label" style="margin-top:2vh">BEAM AT ${at}</div><div class="d-cell">${Math.abs(off) < 5 ? "on height" : `${Math.abs(off).toFixed(0)} cm ${off > 0 ? "high" : "low"}`}</div>
           <div class="d-sub" style="text-align:left">${j.lvZ ? "Tilt the tripod head until it\u2019s green" : "Not zeroed yet: zero it on the controller"}</div></div></div>`;
     }
   } else if (j.s === "nolidar") {
@@ -2806,7 +2807,8 @@ function lvAt() {
 }
 // heights are stored in metres; typed in inches or cm (the body-weight unit picks which)
 const lvSensorH = () => settings.lvSensorH || 1.0, lvBackH = () => settings.lvBackH || 1.0;
-const lvColour = (ap) => (ap < 0.1 ? "var(--good)" : ap < 0.4 ? "var(--warn)" : "var(--bad)");
+// green within 0.2° (10 cm at 30 m: the back band), amber to 0.6°. Calmer than the first version (0.1° / 0.4°, hundredths).
+const lvColour = (ap) => (ap < 0.2 ? "var(--good)" : ap < 0.6 ? "var(--warn)" : "var(--bad)");
 async function lvFetch(body) {
   const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), body ? 2500 : 900);
   try {
@@ -2854,11 +2856,11 @@ function lvBeamLine(pitch) {
 // update the moving parts without redrawing the page (so inputs keep focus)
 function lvPaint() {
   const j = lv.j; if (!j || view !== "level") return;
-  const ap = Math.abs(j.pitch), col = lvColour(ap), R = 70, k = 30;
+  const ap = Math.abs(j.pitch), col = lvColour(ap), R = 70, k = 16;
   let bx = j.roll * k, by = -j.pitch * k; const L = Math.hypot(bx, by), lim = R - 14; if (L > lim) { bx *= lim / L; by *= lim / L; }
   const b = $("#lvDot"); if (b) { b.setAttribute("cx", 80 + bx); b.setAttribute("cy", 80 + by); b.setAttribute("fill", col); }
-  const n = $("#lvNum"); if (n) { n.textContent = (ap < 0.005 ? "0.00" : (j.pitch > 0 ? "+" : "−") + ap.toFixed(2)) + "°"; n.style.color = col; }
-  const w = $("#lvWord"); if (w) { w.textContent = ap < 0.1 ? "Level" : j.pitch > 0 ? "Nose up" : "Nose down"; w.style.color = col; }
+  const n = $("#lvNum"); if (n) { n.textContent = (ap < 0.05 ? "0.0" : (j.pitch > 0 ? "+" : "−") + ap.toFixed(1)) + "°"; n.style.color = col; }
+  const w = $("#lvWord"); if (w) { w.textContent = ap < 0.2 ? "Level" : j.pitch > 0 ? "Nose up" : "Nose down"; w.style.color = col; }
   const r = $("#lvRoll"); if (r) r.textContent = `Side lean ${Math.abs(j.roll).toFixed(1)}°${Math.abs(j.roll) < 1 ? " (fine)" : ""}`;
   const st = $("#lvStill"); if (st) st.textContent = j.still ? "Still" : "Moving…";
   const D = lvAt(), h0 = lvSensorH(), top = 2.0, H = 120, y = (h) => H - 12 - (h / top) * (H - 24);

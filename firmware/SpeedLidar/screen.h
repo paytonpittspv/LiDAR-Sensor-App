@@ -349,28 +349,30 @@ static void drawLevel(const Model& M) {
     foot("SDA GPIO 4 \xC2\xB7 SCL GPIO 5", "3V3 \xC2\xB7 GND");
     return;
   }
-  float ap = fabsf(M.pitch); RGB col = ap < .1f ? GREEN : ap < .4f ? AMBER : RED;
-  strip(M, ap < .1f ? "LEVEL \xC2\xB7 GOOD" : "LEVEL", col);
-  // bubble: 22 px per degree, pinned to the rim past that
+  // green within 0.2° (10 cm at 30 m, the width of the back band), amber to 0.6°
+  float ap = fabsf(M.pitch); RGB col = ap < .2f ? GREEN : ap < .6f ? AMBER : RED;
+  strip(M, ap < .2f ? "LEVEL \xC2\xB7 GOOD" : "LEVEL", col);
+  // bubble: 12 px per degree (was 22: too jumpy), pinned to the rim past 3°
   const float cx = 62, cy = 96, R = 46;
   for (int j = (int)(cy - R - 2); j <= (int)(cy + R + 2); j++) for (int i = (int)(cx - R - 2); i <= (int)(cx + R + 2); i++) {
     float d = hypotf(i + .5f - cx, j + .5f - cy), a = 1.6f - fabsf(d - R); if (a > 0) blend(i, j, LINE, a > 1 ? 1 : a);
-    float r2 = 1.4f - fabsf(d - 6.5f); if (r2 > 0) blend(i, j, LINE, r2 > 1 ? 1 : r2);   // the 0.3° target ring
+    float r2 = 1.4f - fabsf(d - 6.5f); if (r2 > 0) blend(i, j, LINE, r2 > 1 ? 1 : r2);   // the target ring
   }
   rect((int)(cx - R + 4), (int)cy, (int)(2 * R - 8), 1, LINE); rect((int)cx, (int)(cy - R + 4), 1, (int)(2 * R - 8), LINE);
-  float bx = M.roll * 22, by = -M.pitch * 22, L = hypotf(bx, by), lim = R - 9; if (L > lim) { bx *= lim / L; by *= lim / L; }
+  float bx = M.roll * 12, by = -M.pitch * 12, L = hypotf(bx, by), lim = R - 9; if (L > lim) { bx *= lim / L; by *= lim / L; }
   for (int j = (int)(cy + by - 9); j <= (int)(cy + by + 9); j++) for (int i = (int)(cx + bx - 9); i <= (int)(cx + bx + 9); i++) {
     float a = 7.5f - hypotf(i + .5f - cx - bx, j + .5f - cy - by); if (a > 0) blend(i, j, col, a > 1 ? 1 : a);
   }
   // nose angle
   text(F_B13, "NOSE", 126, 44, DIM);
-  char v[12]; snprintf(v, sizeof v, "%+.2f", M.pitch); if (ap < .005f) strcpy(v, "0.00");
+  char v[12]; snprintf(v, sizeof v, "%+.1f", M.pitch); if (ap < .05f) strcpy(v, "0.0");   // tenths: hundredths never sat still
   bigNum(v, 126, 90, 58, col, "\xC2\xB0", LEFT, 120);
-  text(F_XB18, ap < .1f ? "LEVEL" : M.pitch > 0 ? "UP" : "DOWN", W - 10, 90, col, RIGHT);
+  text(F_XB18, ap < .2f ? "LEVEL" : M.pitch > 0 ? "UP" : "DOWN", W - 10, 90, col, RIGHT);
   // where the beam is at the distance the app gave
   float off = M.levelAt * tanf(M.pitch * 0.01745329f) * 100;   // cm above the sensor's height
   char at[16], h[24]; if (M.vault) snprintf(at, sizeof at, "AT %.0f FT", M.levelAt * 3.28084f); else snprintf(at, sizeof at, "AT %.0f M", M.levelAt);
-  if (fabsf(off) < 1) strcpy(h, "on height"); else snprintf(h, sizeof h, "%.0f cm %s", fabsf(off), off > 0 ? "high" : "low");
+  off = roundf(off / 5) * 5;   // in 5 cm steps
+  if (fabsf(off) < 5) strcpy(h, "on height"); else snprintf(h, sizeof h, "%.0f cm %s", fabsf(off), off > 0 ? "high" : "low");
   text(F_B11, "BEAM", 126, 116, DIM); text(F_B11, at, 160, 116, DIM);
   text(F_XB18, h, 126, 138, FG);
   foot(M.zeroed ? "Tilt the tripod head until it's green" : "Not zeroed yet: zero it in the app", M.bumped ? "moved since aimed" : "BMI160");
