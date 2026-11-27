@@ -65,6 +65,7 @@
 #include <DNSServer.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <esp_ota_ops.h>
 #include <ArduinoOTA.h>
 #include <SPI.h>
 #include <Wire.h>
@@ -1228,7 +1229,12 @@ static esp_err_t hsCertPost(httpd_req_t* r) {
 }
 static esp_err_t hsUpdate(httpd_req_t* r) {
   size_t total = r->content_len, done = 0;
-  if (!total || !updBegin(total)) return hsJson(r, "{\"ok\":false,\"error\":\"couldn't start the update\"}");
+  if (!total) return hsJson(r, "{\"ok\":false,\"error\":\"the file arrived empty\"}");
+  if (!updBegin(total)) {   // say why: "No Partition" means it was flashed over USB with a scheme that has one app slot
+    String e = Update.errorString(); Update.abort(); e.replace("\"", "'");
+    bool noSlot = esp_ota_get_next_update_partition(NULL) == NULL;
+    return hsJson(r, String("{\"ok\":false,\"error\":\"") + (noSlot ? "this board has no second app slot, so it can't update over Wi-Fi. Flash it once over USB with Partition Scheme '16M Flash (3MB APP/9.9MB FATFS)'" : "couldn't start the update (" + e + ")") + "\"}");
+  }
   static uint8_t buf[4096]; bool ok = true;
   while (done < total) {
     int got = httpd_req_recv(r, (char*)buf, total - done < sizeof(buf) ? total - done : sizeof(buf));

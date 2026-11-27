@@ -37,8 +37,8 @@ Wiring: TF03 red → 5V, black → GND, brown (TX) → GPIO16, blue (RX) → GPI
 
 1. Arduino IDE → Boards Manager → install **esp32 by Espressif**.
 2. Open `firmware/SpeedLidar/SpeedLidar.ino`.
-3. Tools → Board → **ESP32 Dev Module**.
-4. Tools → Partition Scheme → **Huge APP (3MB No OTA/1MB SPIFFS)**.
+3. Tools → Board → **ESP32S3 Dev Module**; Flash Size **16MB (128Mb)**; PSRAM **OPI PSRAM**.
+4. Tools → Partition Scheme → **16M Flash (3MB APP/9.9MB FATFS)**. It has two app slots, which is what lets the sensor update over Wi-Fi afterwards. A scheme marked "No OTA" runs, but every later update then has to go over USB.
 5. Upload.
 
 ## How a run works

@@ -2475,7 +2475,7 @@ function settingsHTML() {
     <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
     ${secureCardHTML()}${devicesCardHTML()}${firmwareCardHTML()}${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}
     <div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps. Simulated runs are marked and never sent.</div><div class="row"><button class="btn" data-act="demo-data">Add demo data</button>${runs.some((r) => r.sim) || jumps.some((j) => j.sim) ? `<button class="btn" data-act="del-sim">Delete simulated runs</button>` : ""}<button class="btn danger" data-act="clear-all">Delete all runs</button></div></div>`;
-  h += `<p class="small muted" style="text-align:center;margin-top:20px">PAYTON'S LiDAR SENSOR · designed by Payton Pitts</p>`;
+  h += `<p class="small muted" style="text-align:center;margin-top:20px">LiDAR SENSOR · developed by Payton Pitts</p>`;
   return h;
 }
 const wLabel = (w) => (w !== "" && w != null ? `<b>${w}</b> ${settings.weightUnit}` : `<span class="muted">Set body weight</span>`) + `<span class="wpick-ch">›</span>`;
