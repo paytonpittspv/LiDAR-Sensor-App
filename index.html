@@ -3922,6 +3922,7 @@ function analyticsHTML() {
   // best per day
   const byDay = {}; for (const r of tr) { const v = headline(r).value; if (v == null || !isFinite(v)) continue; const k = dayKey(r.ts); if (!byDay[k] || (isSprint ? v < byDay[k].v : v > byDay[k].v)) byDay[k] = { v, r }; }
   const days = Object.keys(byDay).sort();
+  let progress = "";   // shown after the records and the consistency cards, not first
   if (days.length) {
     const t0 = new Date(days[0]).getTime(), X = days.map((d) => (new Date(d).getTime() - t0) / 864e5), Y = days.map((d) => byDay[d].v);
     const lo = Math.min(...Y), hi = Math.max(...Y), padY = Math.max(0.05, (hi - lo) * 0.25);
@@ -3930,8 +3931,10 @@ function analyticsHTML() {
       yfmt: (t) => t.toFixed(2), xt: X.length > 1 ? [X[0], X[X.length - 1]] : [X[0]], xfmt: (t) => dayLabel(days[X.indexOf(t)] || days[0]),
       series: [{ x: X, y: Y, color: "var(--purple)", w: 2.4, fill: !isSprint }],
       dots: X.map((x, i) => ({ x, y: Y[i], attrs: `data-act="open-session" data-id="${days[i]}" style="cursor:pointer"` })) });
-    h += `<div class="card"><div class="between"><div class="label">Best ${isSprint ? "time" : "last 5 m"} per day</div><div class="small muted">${isSprint ? "lower is better" : "higher is better"}</div></div>${chart}<div class="small muted">Tap a dot to open that session.</div></div>`;
+    progress = `<div class="card"><div class="between"><div class="label">Best ${isSprint ? "time" : "last 5 m"} per day</div><div class="small muted">${isSprint ? "lower is better" : "higher is better"}</div></div>${chart}<div class="small muted">Tap a dot to open that session.</div></div>`;
   }
+  // what matters for this test
+  if (!isSprint) { h += vaultProfileCard(tr); if (!(SETUPS[anState.test.split("-")[1]] || {}).pole) h += vaultHipCard(tr); }
   // records
   h += `<div class="card"><div class="label" style="margin-bottom:6px">Personal records · ${testName(anState.test)}</div><div class="list">`;
   const rec = (label, pick, better, fmt) => {
@@ -3945,9 +3948,8 @@ function analyticsHTML() {
   }
   { const kg = tr.some((r) => r.res.fv && r.res.fv.P0abs); h += rec("Power", (r) => r.res.fv && (kg ? r.res.fv.P0abs : r.res.fv.P0), "high", (v) => (kg ? `${Math.round(v)} W` : `${f1(v)} W/kg`)); }
   h += `</div></div>`;
-  // what matters for this test
-  h += isSprint ? sprintProfileCard(mine, tr) : vaultProfileCard(tr);
-  if (!isSprint && !(SETUPS[anState.test.split("-")[1]] || {}).pole) h += vaultHipCard(tr);
+  if (isSprint) h += sprintProfileCard(mine, tr);
+  h += progress;
   // fastest at each distance (all sprints)
   if (isSprint) {
     const sprints = mine.filter((r) => r.mode === "sprint");
@@ -3974,7 +3976,7 @@ function jumpAnalyticsHTML(mine) {
   const cm = (m) => (m * 100).toFixed(1);
   const byDay = {}; for (const j of mine) { const k = dayKey(j.ts); const d = byDay[k] || (byDay[k] = { h: 0, s: 0, n: 0 }); d.h = Math.max(d.h, j.h); d.s = Math.max(d.s, j.hStand || 0); d.n++; }
   const days = Object.keys(byDay).sort();
-  let h = "";
+  let h = "", progress = "";
   if (days.length) {
     const t0 = new Date(days[0]).getTime(), X = days.map((d) => (new Date(d).getTime() - t0) / 864e5);
     const Y = days.map((d) => byDay[d].h * 100), S = days.map((d) => (byDay[d].s ? byDay[d].s * 100 : null));
@@ -3984,7 +3986,7 @@ function jumpAnalyticsHTML(mine) {
       yfmt: (t) => t.toFixed(0), xt: X.length > 1 ? [X[0], X[X.length - 1]] : [X[0]], xfmt: (t) => dayLabel(days[X.indexOf(t)] || days[0]),
       series: [{ x: X, y: Y, color: "var(--purple)", w: 2.4, fill: true }].concat(sy.length ? [{ x: sx, y: sy, color: "var(--pink)", w: 2, dash: "5 4" }] : []),
       dots: X.map((x, i) => ({ x, y: Y[i] })) });
-    h += `<div class="card"><div class="between"><div class="label">Best jump per day</div><div class="small muted"><b style="color:var(--purple)">━</b> takeoff · <b style="color:var(--pink)">┅</b> standing</div></div>${chart}</div>`;
+    progress = `<div class="card"><div class="between"><div class="label">Best jump per day</div><div class="small muted"><b style="color:var(--purple)">━</b> takeoff · <b style="color:var(--pink)">┅</b> standing</div></div>${chart}</div>`;
   }
   const best = (k) => mine.reduce((b, j) => (j[k] != null && (!b || j[k] > b[k]) ? j : b), null), bh = best("h"), bs = best("hStand");
   h += `<div class="card"><div class="label" style="margin-bottom:6px">Personal records · Vertical jump</div><div class="list">
@@ -4011,6 +4013,7 @@ function jumpAnalyticsHTML(mine) {
       <div class="small muted" style="margin:8px 0 ${ch ? 4 : 0}px"><b>Quickness</b>: seconds from starting the dip to leaving the ground. Lower is snappier. <b>Spring</b>: height for the time spent on the ground (coaches call it RSImod). Higher means a high jump from a quick dip, not a big slow one. <b>Power</b>: the hardest push of the jump.${jkg(anState.athleteId) ? "" : " Add body weight for watts."}</div>
       ${ch ? `<div class="label" style="margin-top:6px">Best spring per day</div>${ch}` : ""}</div>`;
   }
+  h += progress;
   // compare: pick who (up to six), ranked bars, print the group report
   const withJ = athletes.filter((x) => jumps.some((j) => j.athleteId === x.id));
   if (withJ.length > 1) {
