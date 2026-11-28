@@ -181,6 +181,15 @@ input[type=text],input[type=number],select{background:var(--card2);border:1px so
 .live{font-size:40px;font-weight:800;font-variant-numeric:tabular-nums}
 .list .item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer}
 .list .item:last-child{border-bottom:0}
+.smenu{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stile{display:flex;flex-direction:column;justify-content:center;gap:3px;text-align:left;min-height:76px;padding:10px 12px;border-radius:14px;border:1px solid var(--line);background:var(--card);cursor:pointer}
+.stile b{font-size:15px;line-height:1.2}.stile span{font-size:12px;line-height:1.3;color:var(--muted)}
+.stile:active{background:var(--card2)}
+.fold{border:1px solid var(--line);border-radius:14px;background:var(--card);margin-bottom:8px;overflow:hidden}
+.foldh{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;padding:12px 14px;background:none;border:0;cursor:pointer}
+.foldh>span{display:flex;flex-direction:column;gap:2px}.foldh i{font-style:normal;font-size:22px;color:var(--muted);transition:transform .15s}
+.fold.open .foldh i{transform:rotate(90deg)}
+.foldb{padding:0 8px 8px}.foldb>.card{margin:0 0 8px;border:0;background:none;padding:6px}.foldb>.card:last-child{margin-bottom:0}
 .list .item .r{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
 .check{width:22px;height:22px;border-radius:7px;border:2px solid var(--line);flex:none;display:grid;place-items:center;font-size:13px;font-weight:800}
 .check.on{background:var(--tint-strong);border-color:transparent}
@@ -3995,24 +4004,50 @@ function jumpAnalyticsHTML(mine) {
   return h;
 }
 
+let setFold = null;   // which fold-open row is open on a Settings page
 function settingsHTML() {
   const si = Store.info(), mb = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${(b / 1e6).toFixed(1)} MB`);
   const where = si.mode === "db" ? `in the phone's database${si.usage != null ? ` (${mb(si.usage)} used${si.quota ? ` of ${mb(si.quota)} available` : ""})` : ""}` : "in the phone's basic storage (the database didn't open: reload the app)";
   const kept = si.persisted ? "Protected: the phone won't clear it on its own."
     : standalone() ? "Saved in the home-screen app, which the phone doesn't clear on its own."
     : "Open the app from its home-screen icon so the phone never clears it on its own. Runs saved in a browser tab can be cleared after a week without visiting.";
-  let h = `<h1>Settings</h1>`;
-  h += `<h2>Athletes</h2><div class="card list">${athletes.length ? athletes.map((a) => `<div class="item" data-act="ath-edit" data-id="${a.id}"><div><b>${esc(a.name)}</b><div class="small muted">${a.kg ? (settings.weightUnit === "lb" ? `${Math.round(a.kg / 0.453592)} lb` : `${a.kg.toFixed(1)} kg`) : "No body weight"}</div></div><div class="r">›</div></div>`).join("") : `<div class="muted">No athletes yet.</div>`}</div><button class="btn" data-act="ath-new">Add athlete</button>`;
-  h += `<h2>Sound and Hands Free</h2>${chimeCard()}<div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Save every run and get ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>${voiceCard()}
-    <div class="card between"><div><b>Body weight in</b></div><div class="seg" style="width:140px"><button data-act="unit" data-v="lb" aria-pressed="${settings.weightUnit === "lb"}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${settings.weightUnit === "kg"}">kg</button></div></div>
+  // Settings is a short menu; each row opens its own page (the old single page was one long scroll)
+  const sec = viewArg, pods = (() => { try { return podsOn().length; } catch (e) { return 0; } })();
+  const lookName = settings.theme === "dark" ? "Dark" : settings.theme === "light" ? "Light" : "Auto";
+  const MENU = [
+    ["athletes", "Athletes", athletes.length ? `${athletes.length} athlete${athletes.length > 1 ? "s" : ""} \u00b7 names and body weight` : "Add the people you time"],
+    ["sound", "Sound and Hands Free", `Hands Free ${settings.solo ? "on" : "off"} \u00b7 voice ${settings.voice ? "on" : "off"}`],
+    ["look", "Look and units", `${lookName} \u00b7 body weight in ${settings.weightUnit}`],
+    ["pods", "Waist pods", pods ? `${pods} pod${pods > 1 ? "s" : ""} connected` : "Calibrate, who wears which, jump test"],
+    ["tripod", "Tripod setup", sensor.connected && sensor.bump ? `<b style="color:var(--warn)">The tripod moved.</b> Level and aim` : "Level and aim, runway setup guides"],
+    ["data", "Your data", `${runs.length} run${runs.length === 1 ? "" : "s"} saved \u00b7 backup, move runs, demo data`],
+    ["sensor", "Sensor", sensor.connected ? `Running ${esc(sensor.fw || "")} \u00b7 update, secure address, devices` : "Not connected \u00b7 update, secure address, devices"],
+  ];
+  if (!sec || !MENU.some((m) => m[0] === sec)) {
+    return `<h1 style="margin-bottom:10px">Settings</h1><div class="smenu">${MENU.map(([k, t, d]) => `<button class="stile" data-act="set-open" data-v="${k}"><b>${t}</b><span>${d}</span></button>`).join("")}
+      <button class="stile" data-act="go-level"><b>Level and aim</b><span>Straight to the digital level</span></button></div>`;
+  }
+  let h = `<button class="btn sm" data-act="back">\u2039 Settings</button><h1 style="margin-top:10px">${MENU.find((m) => m[0] === sec)[1]}</h1>`;
+  const fold = (k, t, d, body) => `<div class="fold${setFold === k ? " open" : ""}"><button class="foldh" data-act="set-fold" data-v="${k}"><span><b>${t}</b><span class="small muted">${d}</span></span><i>\u203a</i></button>${setFold === k ? `<div class="foldb">${body}</div>` : ""}</div>`;
+  if (sec === "athletes") h += `<div class="card list">${athletes.length ? athletes.map((a) => `<div class="item" data-act="ath-edit" data-id="${a.id}"><div><b>${esc(a.name)}</b><div class="small muted">${a.kg ? (settings.weightUnit === "lb" ? `${Math.round(a.kg / 0.453592)} lb` : `${a.kg.toFixed(1)} kg`) : "No body weight"}</div></div><div class="r">›</div></div>`).join("") : `<div class="muted">No athletes yet.</div>`}</div><button class="btn" data-act="ath-new">Add athlete</button>`;
+  else if (sec === "sound") h += `${chimeCard()}<div class="card between" style="margin-top:6px"><div><b>Hands Free Mode</b><div class="small muted">Save every run and get ready for the next athlete by itself.</div></div><label class="switch"><input type="checkbox" id="soloSw" ${settings.solo ? "checked" : ""}><span></span></label></div>${voiceCard()}`;
+  else if (sec === "look") h += `<div class="card between"><div><b>Body weight in</b></div><div class="seg" style="width:140px"><button data-act="unit" data-v="lb" aria-pressed="${settings.weightUnit === "lb"}">lb</button><button data-act="unit" data-v="kg" aria-pressed="${settings.weightUnit === "kg"}">kg</button></div></div>
     <div class="card between"><div><b>Look</b></div><div class="seg" style="width:200px"><button data-act="theme" data-v="" aria-pressed="${!settings.theme}">Auto</button><button data-act="theme" data-v="dark" aria-pressed="${settings.theme === "dark"}">Dark</button><button data-act="theme" data-v="light" aria-pressed="${settings.theme === "light"}">Light</button></div></div>`;
-  h += `<h2>Waist pods</h2>${podCardHTML()}`;
-  h += `<h2>Tripod setup</h2><div class="card between"><div><b>Level &amp; aim</b><div class="small muted">Digital level, where the beam lands down the runway, and the bump alarm.${sensor.connected && sensor.bump ? ` <b style="color:var(--warn)">The tripod moved.</b>` : ""}</div></div><button class="btn" data-act="go-level">Open</button></div>${setupGuide("runway100")}${setupGuide("runway150")}`;
-  h += `<h2>Your data</h2><div class="card"><div class="small muted" style="margin-bottom:10px">${WEB_COPY ? "This copy of the app opens with no connection at all." : "This is the sensor's page. Send runs to your home-screen app after each session."} ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
-    <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>
-    ${secureCardHTML()}${devicesCardHTML()}${firmwareCardHTML()}${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}
-    <div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps. Simulated runs are marked and never sent.</div><div class="row"><button class="btn" data-act="demo-data">Add demo data</button>${runs.some((r) => r.sim) || jumps.some((j) => j.sim) ? `<button class="btn" data-act="del-sim">Delete simulated runs</button>` : ""}<button class="btn danger" data-act="clear-all">Delete all runs</button></div></div>`;
-  h += `<p class="small muted" style="text-align:center;margin-top:20px">LiDAR SENSOR · developed by Payton Pitts</p>`;
+  else if (sec === "pods") h += podCardHTML();
+  else if (sec === "tripod") { h += `<div class="card between"><div><b>Level &amp; aim</b><div class="small muted">Digital level, where the beam lands down the runway, and the bump alarm.${sensor.connected && sensor.bump ? ` <b style="color:var(--warn)">The tripod moved.</b>` : ""}</div></div><button class="btn" data-act="go-level">Open</button></div>`;
+    h += fold("g100", "Vault runway \u00b7 100 ft", "Where the tripod goes and how to check it", setupGuide("runway100")) + fold("g150", "Second setup \u00b7 " + SETUPS.runway150.boxFt + " ft", "The longer setup", setupGuide("runway150")); }
+  else if (sec === "data") {
+    h += fold("backup", "Backup", `${runs.length} run${runs.length === 1 ? "" : "s"} on this device`, `<div class="card"><div class="small muted" style="margin-bottom:10px">${WEB_COPY ? "This copy of the app opens with no connection at all." : "This is the sensor's page. Send runs to your home-screen app after each session."} ${runs.length} runs saved ${where}. ${kept} Export a backup now and then, and to move runs to another phone.</div>
+    <div class="row"><button class="btn" data-act="export">Export backup</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept="application/json,.json" class="hidden"></label></div></div>`)
+      + fold("move", "Move runs between copies", "Sensor page, home-screen app, another phone", `${WEB_COPY || ON_SECURE ? getCardHTML() : ""}${ON_SECURE ? "" : sendCardHTML(false)}`)
+      + fold("demo", "Demo data and deleting", "Simulated runs; delete everything", `<div class="card"><div class="small muted" style="margin-bottom:10px">Try the app without the sensor: adds a demo athlete with two weeks of simulated sprints and jumps. Simulated runs are marked and never sent.</div><div class="row"><button class="btn" data-act="demo-data">Add demo data</button>${runs.some((r) => r.sim) || jumps.some((j) => j.sim) ? `<button class="btn" data-act="del-sim">Delete simulated runs</button>` : ""}<button class="btn danger" data-act="clear-all">Delete all runs</button></div></div>`);
+  }
+  else if (sec === "sensor") {
+    setFold = setFold || "fw";
+    h += fold("fw", "Firmware", sensor.connected ? `Running ${esc(sensor.fw || "")}` : "Connect to see the version", firmwareCardHTML())
+      + fold("secure", "Secure address", ON_SECURE ? "sensor.paytonpittsdesigns.com" : "Set up once, then save it to the home screen", secureCardHTML())
+      + fold("devices", "Devices", sensor.connected && sensor.role === "control" ? "This device is the controller" : sensor.connected && sensor.role === "display" ? "This device is a display" : "Controller and big display", devicesCardHTML());
+  }
   return h;
 }
 const wLabel = (w) => (w !== "" && w != null ? `<b>${w}</b> ${settings.weightUnit}` : `<span class="muted">Set body weight</span>`) + `<span class="wpick-ch">›</span>`;
@@ -4136,6 +4171,8 @@ document.addEventListener("click", (e) => {
   if (act === "cmp-toggle") { e.stopPropagation(); toggleCompare(id); return; }
   switch (act) {
     case "back": back(); break;
+    case "set-open": setFold = null; nav("settings", v); break;
+    case "set-fold": setFold = setFold === v ? "-" : v; render(); break;
     case "lc-detail": lcDetail = !lcDetail; document.querySelectorAll('[data-act="lc-detail"]').forEach((b) => b.setAttribute("aria-pressed", lcDetail)); lcDrawAll(); break;
     case "open-run": nav("run", id); break;
     case "open-session": nav("session", id); break;

@@ -181,6 +181,15 @@ input[type=text],input[type=number],select{background:var(--card2);border:1px so
 .live{font-size:40px;font-weight:800;font-variant-numeric:tabular-nums}
 .list .item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer}
 .list .item:last-child{border-bottom:0}
+.smenu{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stile{display:flex;flex-direction:column;justify-content:center;gap:3px;text-align:left;min-height:76px;padding:10px 12px;border-radius:14px;border:1px solid var(--line);background:var(--card);cursor:pointer}
+.stile b{font-size:15px;line-height:1.2}.stile span{font-size:12px;line-height:1.3;color:var(--muted)}
+.stile:active{background:var(--card2)}
+.fold{border:1px solid var(--line);border-radius:14px;background:var(--card);margin-bottom:8px;overflow:hidden}
+.foldh{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;padding:12px 14px;background:none;border:0;cursor:pointer}
+.foldh>span{display:flex;flex-direction:column;gap:2px}.foldh i{font-style:normal;font-size:22px;color:var(--muted);transition:transform .15s}
+.fold.open .foldh i{transform:rotate(90deg)}
+.foldb{padding:0 8px 8px}.foldb>.card{margin:0 0 8px;border:0;background:none;padding:6px}.foldb>.card:last-child{margin-bottom:0}
 .list .item .r{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
 .check{width:22px;height:22px;border-radius:7px;border:2px solid var(--line);flex:none;display:grid;place-items:center;font-size:13px;font-weight:800}
 .check.on{background:var(--tint-strong);border-color:transparent}
