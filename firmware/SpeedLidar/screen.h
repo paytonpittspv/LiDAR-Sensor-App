@@ -295,18 +295,36 @@ static void drawResult(const Model& M) {
   foot(M.footL, M.footR);
 }
 // The app's page in its simplest form (Home, Sessions, Analytics, Settings...), so the screen follows the phone.
+static bool hasAll(const Font& f, const char* s) { while (*s) if (!glyph(f, nextCp(s))) return false; return true; }
 static void drawPage(const Model& M) {
   strip(M, M.pgTitle[0] ? M.pgTitle : "LiDAR SENSOR", PURPLE);
-  if (M.pgV[0]) { text(F_B13, M.pgK, 10, 42, DIM); bigNum(M.pgV, 10, 100, 64, FG, M.pgU, LEFT, W - 20); }
-  else { text(F_XB24, M.pgK, 10, 64, FG); text(F_S13, M.pgSub, 10, 88, DIM); }
-  float cw = 102;
-  for (int i = 0; i < M.nPg; i++) {
-    float x = 10 + i * cw;
-    text(F_B11, M.pg[i].k, x, 120, DIM);
-    bigNum(M.pg[i].v, x, 140, 18, FG, M.pg[i].u, LEFT, cw - 6);
-  }
   char r[16]; snprintf(r, sizeof r, "%d phone%s", M.phones, M.phones == 1 ? "" : "s");
-  foot(M.pgV[0] ? M.pgSub : "", r);
+  const float cw = (W - 20) / 3.f, maxW = W - 20;
+  auto cells = [&]() { for (int i = 0; i < M.nPg; i++) { float x = 10 + i * cw; text(F_B11, M.pg[i].k, x, 122, DIM); bigNum(M.pg[i].v, x, 145, 24, FG, M.pg[i].u, LEFT, cw - 6); } };
+  if (M.pgV[0]) {   // a number page: the number as big as the result screen's, three smaller ones under it
+    text(F_B13, M.pgK, 10, 40, DIM);
+    bigNum(M.pgV, 10, M.nPg ? 104 : 116, 72, FG, M.pgU, LEFT, maxW);
+    cells(); foot(M.pgSub, r); return;
+  }
+  // a words page: the words as big as they will go. One line, or two if that lets them be bigger.
+  const Font* big = hasAll(F_XB58, M.pgK) ? &F_XB58 : &F_XB34;
+  char l1[24], l2[24] = ""; strlcpy(l1, M.pgK, sizeof l1);
+  bool two = false;
+  if (measure(*big, M.pgK) > maxW) {
+    // split at the space nearest the middle
+    int n = strlen(M.pgK), best = -1; for (int i = 1; i < n - 1; i++) if (M.pgK[i] == ' ' && (best < 0 || abs(i - n / 2) < abs(best - n / 2))) best = i;
+    if (best > 0 && !M.nPg) { strlcpy(l1, M.pgK, best + 1 < (int)sizeof l1 ? best + 1 : sizeof l1); strlcpy(l2, M.pgK + best + 1, sizeof l2); two = true;
+      if (measure(*big, l1) > maxW || measure(*big, l2) > maxW) big = &F_XB34;
+      if (measure(*big, l1) > maxW || measure(*big, l2) > maxW) { two = false; strlcpy(l1, M.pgK, sizeof l1); big = &F_XB24; } }
+    else big = measure(F_XB34, M.pgK) > maxW ? &F_XB24 : &F_XB34;
+  }
+  if (two) {
+    float lh = big->size * .96f, y1 = 22 + (128 - 2 * lh) / 2 + big->size * .78f;
+    text(*big, l1, 10, y1, FG); text(*big, l2, 10, y1 + lh, FG);
+    foot(M.pgSub, r); return;
+  }
+  if (M.nPg) { text(*big, l1, 10, big->size > 40 ? 74 : 62, FG); text(F_B20, M.pgSub, 10, big->size > 40 ? 100 : 88, DIM); cells(); foot("", r); }
+  else { text(*big, l1, 10, big->size > 40 ? 94 : 84, FG); text(F_B20, M.pgSub, 10, big->size > 40 ? 124 : 112, DIM); foot("", r); }
 }
 static void drawNoLidar(const Model& M) {
   strip(M, "NO LIDAR", AMBER);

@@ -3082,7 +3082,9 @@ function pageModel() {
     Object.assign(m, { t: "HOME", k: "RUNS TODAY", v: String(today), live: 1, sub: n1(athletes.length, "athlete"),
       cells: [["THIS WEEK", String(week), "runs"], ["JUMPS", String(jumps.filter((j) => now - j.ts < 7 * 864e5).length), "wk"], ["SAVED", String(runs.length), ""]] });
   } else if (view === "new") {
-    Object.assign(m, { t: "NEW SESSION", k: cap.mode === "vault" ? "VAULT" : cap.mode === "jump" ? "VERTICAL JUMP" : "SPRINT", live: 1, sub: cap.athleteId ? who(cap.athleteId) : "Pick who's running" });
+    const S = SETUPS[cap.setup] || {}, wi = typeof WIZ !== "undefined" ? WIZ.indexOf(cap.step) : -1;
+    Object.assign(m, { t: "NEW SESSION", k: cap.mode === "vault" ? "VAULT" : cap.mode === "jump" ? "VERTICAL JUMP" : "SPRINT", live: 1, sub: cap.athleteId ? who(cap.athleteId) : "PICK WHO'S RUNNING",
+      cells: [[cap.mode === "vault" ? "SETUP" : "DISTANCE", cap.mode === "vault" ? (S.boxFt ? S.boxFt + " FT" : "-") : cap.target ? cap.target + " M" : "-", ""], ["ATHLETES", String(athletes.length), ""]].concat(wi >= 0 ? [["STEP", `${wi + 1} OF ${WIZ.length}`, ""]] : []) });
   } else if (view === "sessions") {
     const days = [...new Set(runs.map((r) => dayKey(r.ts)).concat(jumps.map((j) => dayKey(j.ts))))].sort();
     Object.assign(m, { t: "SESSIONS", k: "SESSIONS", v: String(days.length), sub: days.length ? "Last " + A(dayLabel(days[days.length - 1])) : "None yet",

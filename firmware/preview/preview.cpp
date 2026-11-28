@@ -43,6 +43,11 @@ int main(int argc, char** argv) {
     strcpy(P.pgTitle, "HOME"); strcpy(P.pgK, "RUNS TODAY"); strcpy(P.pgV, "12"); P.pgU[0] = 0; strcpy(P.pgSub, "3 athletes"); P.lidar = true; P.sig = 80;
     P.nPg = 3; strcpy(P.pg[0].k, "THIS WEEK"); strcpy(P.pg[0].v, "24"); strcpy(P.pg[0].u, "runs"); strcpy(P.pg[1].k, "JUMPS"); strcpy(P.pg[1].v, "18"); strcpy(P.pg[1].u, "wk"); strcpy(P.pg[2].k, "SAVED"); strcpy(P.pg[2].v, "60"); strcpy(P.pg[2].u, "");
     draw(P); save(out + "/page_home.ppm");
+    { Model N = P; N.lidar = false; strcpy(N.pgTitle, "NEW SESSION"); strcpy(N.pgK, "VAULT"); N.pgV[0] = 0; strcpy(N.pgSub, "PAYTON PITTS");
+      N.nPg = 3; strcpy(N.pg[0].k, "SETUP"); strcpy(N.pg[0].v, "100 FT"); N.pg[0].u[0] = 0; strcpy(N.pg[1].k, "LINEUP"); strcpy(N.pg[1].v, "3"); N.pg[1].u[0] = 0; strcpy(N.pg[2].k, "STEP"); strcpy(N.pg[2].v, "2 OF 3"); N.pg[2].u[0] = 0;
+      draw(N); save(out + "/page_new.ppm");
+      N.nPg = 0; strcpy(N.pgTitle, "SETTINGS"); strcpy(N.pgK, "SETTINGS"); strcpy(N.pgSub, "Firmware v4.18"); draw(N); save(out + "/page_set.ppm");
+      strcpy(N.pgK, "LOOK AND UNITS"); draw(N); save(out + "/page_set3.ppm"); }
     Model R = M; R.screen = S_READY; R.lidar = false; R.distOk = false; R.phones = 1; draw(R); save(out + "/ready_nolidar.ppm");
     Model Wf = M; Wf.screen = S_WIFI; Wf.lidar = false; Wf.phones = 0; draw(Wf); save(out + "/wifi_nolidar.ppm"); }
   M.screen = S_UPDATE; M.updatePct = 62; draw(M); save(out + "/update.ppm");
