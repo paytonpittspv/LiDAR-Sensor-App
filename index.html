@@ -575,7 +575,7 @@ html.disp-on,html.disp-on body{overflow:hidden}
 .jx2 span{font-size:13px;color:var(--text)}.jx2 em{font-weight:600}.jx em.up{color:var(--good)}.jx em.dn{color:var(--bad)}
 .jm{display:block;position:relative;height:4px;border-radius:2px;margin:6px 0 4px;background:linear-gradient(90deg,var(--line),var(--purple))}
 .jm u{position:absolute;top:50%;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--text);border:2px solid var(--card)}
-.jx3 b{font-size:22px}.jx3 div{padding:8px}
+.jx3 b{font-size:21px}.jx3 small{font-size:.5em;margin-left:1px}.jx3 div{padding:8px}
 .jhl{font-family:var(--ui);font-weight:700;font-size:15px;margin:2px 0 4px;color:var(--text)}.jhl span{font-weight:500;color:var(--muted)}.jhl.up{color:var(--good)}
 .jx span{display:block;font-size:12px;color:var(--muted);font-family:var(--ui);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.jx b{font-size:24px;line-height:1.1;white-space:nowrap}.jx small{font-size:.55em;color:var(--muted);margin-left:2px}.jx em{display:block;font-style:normal;font-size:12px;color:var(--muted);margin-top:1px}
 .jtab th,.jtab td{padding:8px 4px}.jtab td .small{white-space:nowrap}
@@ -3833,6 +3833,38 @@ function sprintProfileCard(mine, tr) {
   return h;
 }
 
+// Small bar chart used at the top of every Analytics page: groups of one or two bars, a number over each group,
+// a date under it. It never grows past a sensible size, however wide the screen or however few the bars.
+function leadBars(groups, aria) {
+  const n = groups.length, W = Math.max(150, n * 46), H = 118, y0 = 96, all = groups.flatMap((g) => g.bars.map((b) => b.v));
+  const mn = Math.min(...all), mx = Math.max(...all), lo = mn - Math.max((mx - mn) * 0.6, mx * 0.06), hi = mx + (mx - mn) * 0.05 + 1e-9;
+  const Y = (v) => y0 - ((v - lo) / (hi - lo)) * (y0 - 16), slot = W / n;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;max-width:${Math.max(190, n * 64)}px;margin:10px auto 0" role="img" aria-label="${esc(aria)}">`;
+  groups.forEach((g, i) => { const k = g.bars.length, bw = Math.min(15, (slot * 0.62) / k), x0 = slot * (i + 0.5) - (k * bw + (k - 1) * 3) / 2;
+    svg += `<g ${g.attrs || ""}>${g.bars.map((b, j) => `<rect x="${(x0 + j * (bw + 3)).toFixed(1)}" y="${Y(b.v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(y0 - Y(b.v)).toFixed(1)}" rx="2.5" fill="${b.color}"/>`).join("")}
+      <text x="${(slot * (i + 0.5)).toFixed(1)}" y="${(Y(Math.max(...g.bars.map((b) => b.v))) - 4).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--text)" font-family="var(--display)">${g.top}</text>
+      <text x="${(slot * (i + 0.5)).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--muted)">${g.label}</text></g>`; });
+  return svg + `<line x1="0" x2="${W}" y1="${y0}" y2="${y0}" stroke="var(--line)"/></svg>`;
+}
+// The top of an Analytics page for a single measure (sprint time, jump height): best, latest, the gap between
+// them, a verdict in plain words, then a bar for each of the last eight.
+// items are newest first: { v, ts, attrs }.  o: { label, unit, low (lower is better), fmt, name, line, legend }
+function leadCard(items, o) {
+  if (!items.length) return "";
+  const V = items.map((x) => x.v), best = o.low ? Math.min(...V) : Math.max(...V), latest = items[0], n = items.length;
+  const gap = Math.abs(latest.v - best), pct = (100 * gap) / best, isBest = gap < 1e-9;
+  const col = n < 2 ? "var(--blue)" : isBest || pct <= 1 ? "var(--good)" : pct <= 3 ? "var(--warn)" : "var(--bad)";
+  const word = n < 2 ? "First one on record" : isBest ? "Latest is your best" : pct <= 1 ? "Right at your best" : pct <= 3 ? "Close to your best" : "Off your best";
+  const bestAt = items.find((x) => x.v === best);
+  const groups = items.slice(0, 8).reverse().map((x) => ({ label: dayLabel(dayKey(x.ts)), top: o.fmt(x.v), attrs: x.attrs, bars: [{ v: x.v, color: x.v === best ? "var(--good)" : "var(--blue)" }] }));
+  return `<div class="card"><div class="between"><div class="label">${o.label}</div><span class="small muted">${n} ${o.name}${n > 1 ? "s" : ""}</span></div>
+    <div class="jx jx2 jx3"><div><span>Best</span><b>${o.fmt(best)}<small>${o.unit}</small></b><em>${dayLabel(dayKey(bestAt.ts))}</em></div>
+      <div><span>Latest</span><b style="color:var(--blue)">${o.fmt(latest.v)}<small>${o.unit}</small></b><em>${dayLabel(dayKey(latest.ts))}</em></div>
+      <div><span>Difference</span><b style="color:${col}">${isBest ? o.fmt(0) : (o.low ? "+" : "\u2212") + o.fmt(gap)}<small>${o.unit}</small></b><em>${n < 2 ? "one so far" : isBest ? "level with best" : `${pct.toFixed(1)}% ${o.low ? "slower" : "lower"}`}</em></div></div>
+    <div style="margin-top:10px;font-family:var(--display);font-weight:800;font-size:19px;text-transform:uppercase;letter-spacing:.3px;color:${col}">${word}</div>
+    <div class="small muted">${o.line || ""}</div>
+    ${leadBars(groups, o.label)}<div class="small muted" style="margin-top:2px;text-align:center"><b style="color:var(--good)">\u25a0</b> best \u00b7 <b style="color:var(--blue)">\u25a0</b> ${o.legend}</div></div>`;
+}
 // First thing in vault analytics: how fast they get, and how much of it is still there in the last 5 m.
 function vaultSpeedCard(tr) {
   const ok = tr.filter((r) => r.res.last5 && r.res.top && r.res.top.speed);
@@ -3844,21 +3876,15 @@ function vaultSpeedCard(tr) {
   const word = pct >= 97 ? "Holds speed into the box" : pct >= 94 ? "Eases off before the box" : "Slows a lot before the box";
   const where = ok.map((r) => (r.res.startMarkFt != null && r.res.top.dist != null ? r.res.startMarkFt - r.res.top.dist / FT : null)).filter((x) => x != null && x > 0);
   // paired bars, oldest to newest: top speed and last 5 m for each of the last eight jumps
-  const last = ok.slice(0, 8).reverse(), n = last.length, W = 320, H = 118, y0 = 96, lo = Math.min(...last.map((r) => r.res.last5.speed)) - 0.5, hi = Math.max(...last.map((r) => r.res.top.speed)) + 0.05;
-  const Y = (v) => y0 - ((v - lo) / (hi - lo)) * (y0 - 16), slot = W / n, bw = Math.min(22, slot * 0.3);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;margin-top:10px" role="img" aria-label="Top speed and last 5 m, jump by jump">`;
-  last.forEach((r, i) => { const cx = slot * (i + 0.5), t = r.res.top.speed, l = r.res.last5.speed;
-    svg += `<g data-act="open-run" data-id="${r.id}" style="cursor:pointer"><rect x="${(cx - bw - 1.5).toFixed(1)}" y="${Y(t).toFixed(1)}" width="${bw.toFixed(1)}" height="${(y0 - Y(t)).toFixed(1)}" rx="3" fill="var(--purple)"/><rect x="${(cx + 1.5).toFixed(1)}" y="${Y(l).toFixed(1)}" width="${bw.toFixed(1)}" height="${(y0 - Y(l)).toFixed(1)}" rx="3" fill="var(--blue)"/>
-      <text x="${cx.toFixed(1)}" y="${(Y(t) - 4).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--text)" font-family="var(--display)">${(l - t >= -0.005 ? "0.00" : (l - t).toFixed(2))}</text>
-      <text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${dayLabel(dayKey(r.ts)).replace(/^[A-Za-z]+ /, (m) => m)}</text></g>`; });
-  svg += `<line x1="0" x2="${W}" y1="${y0}" y2="${y0}" stroke="var(--line)"/></svg>`;
+  const svg = leadBars(ok.slice(0, 8).reverse().map((r) => ({ label: dayLabel(dayKey(r.ts)), top: r.res.last5.speed - r.res.top.speed >= -0.005 ? "0.00" : (r.res.last5.speed - r.res.top.speed).toFixed(2),
+    attrs: `data-act="open-run" data-id="${r.id}" style="cursor:pointer"`, bars: [{ v: r.res.top.speed, color: "var(--purple)" }, { v: r.res.last5.speed, color: "var(--blue)" }] })), "Top speed and last 5 m, jump by jump");
   return `<div class="card"><div class="between"><div class="label">Speed \u00b7 top speed against the last 5 m</div><span class="small muted">${ok.length} jump${ok.length > 1 ? "s" : ""}</span></div>
     <div class="jx jx2 jx3"><div><span>Top speed</span><b>${f2(aT)}<small>m/s</small></b><em>${ok.length > 1 ? `best ${f2(Math.max(...T))}` : "this jump"}</em></div>
       <div><span>Last 5 m</span><b style="color:var(--blue)">${f2(aL)}<small>m/s</small></b><em>${ok.length > 1 ? `best ${f2(Math.max(...L))}` : "this jump"}</em></div>
       <div><span>Difference</span><b style="color:${col}">${d >= -0.005 ? "0.00" : "\u2212" + f2(-d)}<small>m/s</small></b><em>${pct.toFixed(1)}% carried</em></div></div>
     <div style="margin-top:10px;font-family:var(--display);font-weight:800;font-size:19px;text-transform:uppercase;letter-spacing:.3px;color:${col}">${word}</div>
     <div class="small muted">${ok.length > 1 ? "Averages over these jumps. " : ""}Top speed is the fastest point of the run; last 5 m is the speed into the box.${where.length ? ` Top speed comes about <b style="color:var(--text)">${ftLabel(avg(where))}</b> from the box.` : ""}</div>
-    ${svg}<div class="small muted" style="margin-top:2px"><b style="color:var(--purple)">\u25a0</b> top speed \u00b7 <b style="color:var(--blue)">\u25a0</b> last 5 m \u00b7 the number is the drop in m/s. Tap a pair to open that jump.</div></div>`;
+    ${svg}<div class="small muted" style="margin-top:2px;text-align:center"><b style="color:var(--purple)">\u25a0</b> top speed \u00b7 <b style="color:var(--blue)">\u25a0</b> last 5 m \u00b7 the number is the drop in m/s. Tap a pair to open that jump.</div></div>`;
 }
 function vaultProfileCard(tr) {
   const ok = tr.filter((r) => r.res.last5);
@@ -4001,6 +4027,12 @@ function analyticsHTML() {
     progress = `<div class="card"><div class="between"><div class="label">Best ${isSprint ? "time" : "last 5 m"} per day</div><div class="small muted">${isSprint ? "lower is better" : "higher is better"}</div></div>${chart}<div class="small muted">Tap a dot to open that session.</div></div>`;
   }
   // what matters for this test
+  if (isSprint) {
+    const it = tr.filter((r) => r.res.time).map((r) => ({ v: r.res.time, ts: r.ts, attrs: `data-act="open-run" data-id="${r.id}" style="cursor:pointer"` }));
+    const tb = bestOf(tr, (r) => r.res.top && r.res.top.speed, "high");
+    h += leadCard(it, { label: `Time \u00b7 ${testName(anState.test)}`, unit: "s", low: true, fmt: f2, name: "run", legend: "the others \u00b7 tap a bar to open that run",
+      line: tb ? `Top speed <b style="color:var(--text)">${f2(tb.v)} m/s</b>${tb.r.res.top.dist != null ? `, reached ${f1(tb.r.res.top.dist)} m into the run` : ""}.` : "" });
+  }
   if (!isSprint) { h += vaultSpeedCard(tr) + vaultProfileCard(tr); if (!(SETUPS[anState.test.split("-")[1]] || {}).pole) h += vaultHipCard(tr); }
   // records
   h += `<div class="card"><div class="label" style="margin-bottom:6px">Personal records · ${testName(anState.test)}</div><div class="list">`;
@@ -4044,6 +4076,9 @@ function jumpAnalyticsHTML(mine) {
   const byDay = {}; for (const j of mine) { const k = dayKey(j.ts); const d = byDay[k] || (byDay[k] = { h: 0, s: 0, n: 0 }); d.h = Math.max(d.h, j.h); d.s = Math.max(d.s, j.hStand || 0); d.n++; }
   const days = Object.keys(byDay).sort();
   let h = "", progress = "";
+  { const bj = mine.reduce((b, j) => (!b || j.h > b.h ? j : b), null);
+    h += leadCard(mine.map((j) => ({ v: j.h * 100, ts: j.ts })), { label: "Jump height \u00b7 takeoff to peak", unit: "cm", fmt: f1, name: "jump", legend: "the others",
+      line: bj ? `Best is <b style="color:var(--text)">${(bj.h / 0.0254).toFixed(1)} in</b>${bj.hFlight != null ? `; a jump mat would read ${cm(bj.hFlight)} cm` : ""}.` : "" }); }
   if (days.length) {
     const t0 = new Date(days[0]).getTime(), X = days.map((d) => (new Date(d).getTime() - t0) / 864e5);
     const Y = days.map((d) => byDay[d].h * 100), S = days.map((d) => (byDay[d].s ? byDay[d].s * 100 : null));
