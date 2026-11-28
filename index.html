@@ -3046,7 +3046,7 @@ function podWatch() {
     if (P.seq !== st.seq && !st.busy) { st.seq = P.seq; podFetch(P.id); }
   }
   if (redraw) { if (!luDrag.dragging) render(); if (pod.air) airTick(); }
-  if (view === "jump") jumpScreen();
+  if (view === "jump") jumpScreen(); else pageScreen();
 }
 // The sensor's own screen shows the Jump test while it's open here: who's up, the live phases (the sensor reads
 // those from the pods itself) and the result while it's up on this page. Sent about once a second.
@@ -3066,6 +3066,61 @@ function jumpScreen(off) {
     if (s) Object.assign(b, { res: 1, h: (s.h * 100).toFixed(1), hs: s.hStand != null ? (s.hStand * 100).toFixed(1) : "", hm: (s.hFlight * 100).toFixed(1), rw: athleteById(s.athleteId).name.slice(0, 23) });
   }
   fetch("/jump", { method: "POST", body: new URLSearchParams(b), cache: "no-store" }).catch(() => {});
+}
+// The sensor's screen follows the app: a bare version of the page you're on (title, one number, up to three small
+// ones). Sent when the page changes and every few seconds while it stays open. The sensor shows it when nothing
+// is being run; on Home and New session it keeps the live distance if the LiDAR is working ("live").
+function pageModel() {
+  const A = (x) => String(x == null ? "" : x).replace(/[\u2018\u2019]/g, "'").replace(/[\u2212\u2013\u2014]/g, "-").replace(/[^\x20-\x7e\u00b7\u00b0]/g, "");
+  const U = (x) => A(x).toUpperCase(), now = Date.now(), n1 = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const m = { t: "LiDAR SENSOR", k: "", v: "", u: "", sub: "", cells: [], live: 0 };
+  const who = (id) => U(athleteById(id).name).slice(0, 23);
+  if (view === "home") {
+    const today = runs.filter((r) => dayKey(r.ts) === dayKey(now)).length, week = runs.filter((r) => now - r.ts < 7 * 864e5).length;
+    Object.assign(m, { t: "HOME", k: "RUNS TODAY", v: String(today), live: 1, sub: n1(athletes.length, "athlete"),
+      cells: [["THIS WEEK", String(week), "runs"], ["JUMPS", String(jumps.filter((j) => now - j.ts < 7 * 864e5).length), "wk"], ["SAVED", String(runs.length), ""]] });
+  } else if (view === "new") {
+    Object.assign(m, { t: "NEW SESSION", k: cap.mode === "vault" ? "VAULT" : cap.mode === "jump" ? "VERTICAL JUMP" : "SPRINT", live: 1, sub: cap.athleteId ? who(cap.athleteId) : "Pick who's running" });
+  } else if (view === "sessions") {
+    const days = [...new Set(runs.map((r) => dayKey(r.ts)).concat(jumps.map((j) => dayKey(j.ts))))].sort();
+    Object.assign(m, { t: "SESSIONS", k: "SESSIONS", v: String(days.length), sub: days.length ? "Last " + A(dayLabel(days[days.length - 1])) : "None yet",
+      cells: [["RUNS", String(runs.length), ""], ["JUMPS", String(jumps.length), ""], ["ATHLETES", String(athletes.length), ""]] });
+  } else if (view === "session") {
+    const rs = runs.filter((r) => dayKey(r.ts) === viewArg), js = jumps.filter((j) => dayKey(j.ts) === viewArg);
+    Object.assign(m, { t: U(dayLabel(viewArg)), k: "RUNS", v: String(rs.length), sub: "Session",
+      cells: [["JUMPS", String(js.length), ""], ["ATHLETES", String(new Set(rs.map((r) => r.athleteId).concat(js.map((j) => j.athleteId))).size), ""]] });
+  } else if (view === "run") {
+    const r = runs.find((x) => x.id === viewArg);
+    if (r && r.res) { const sp = r.mode === "sprint";
+      Object.assign(m, { t: who(r.athleteId), k: sp ? "TIME" : "LAST 5 M", v: sp ? f2(r.res.time) : r.res.last5 ? f2(r.res.last5.speed) : "-", u: sp ? "s" : "m/s", sub: A(dayLabel(dayKey(r.ts))) + " \u00b7 " + A(testShort(testKey(r))),
+        cells: [["TOP SPEED", r.res.top ? f2(r.res.top.speed) : "-", "m/s"]].concat(!sp && r.res.steps && r.res.steps.lefts ? [["LEFTS", String(r.res.steps.lefts), ""]] : []) }); }
+  } else if (view === "analytics" || view === "compare") {
+    const aid = anState.athleteId, t = anState.test || "";
+    m.t = "ANALYTICS"; m.sub = aid ? who(aid) + (t ? " \u00b7 " + A(t === "jump" ? "Vertical jump" : testShort(t)) : "") : "";
+    if (t === "jump") { const js = jumps.filter((j) => j.athleteId === aid);
+      if (js.length) { const b = Math.max(...js.map((j) => j.h)); Object.assign(m, { k: "BEST JUMP", v: (b * 100).toFixed(1), u: "cm", cells: [["LATEST", (js[0].h * 100).toFixed(1), "cm"], ["JUMPS", String(js.length), ""]] }); }
+    } else if (t) { const tr = runs.filter((r) => r.athleteId === aid && testKey(r) === t && r.res);
+      if (tr.length && t.startsWith("sprint")) { const ts = tr.filter((r) => r.res.time).map((r) => r.res.time);
+        if (ts.length) Object.assign(m, { k: "BEST TIME", v: f2(Math.min(...ts)), u: "s", cells: [["LATEST", f2(ts[0]), "s"], ["RUNS", String(ts.length), ""]] });
+      } else if (tr.length) { const ok = tr.filter((r) => r.res.last5 && r.res.top), av = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+        if (ok.length) { const T = av(ok.map((r) => r.res.top.speed)), L = av(ok.map((r) => r.res.last5.speed));
+          Object.assign(m, { k: "LAST 5 M", v: f2(L), u: "m/s", cells: [["TOP SPEED", f2(T), "m/s"], ["DIFFERENCE", (L - T >= -0.005 ? "0.00" : (L - T).toFixed(2)), "m/s"], ["JUMPS", String(ok.length), ""]] }); } } }
+    if (!m.v) m.k = "ANALYTICS";
+  } else if (view === "settings" || view === "athlete" || view === "podcal") {
+    const names = { athletes: "ATHLETES", sound: "SOUND AND HANDS FREE", look: "LOOK AND UNITS", pods: "WAIST PODS", tripod: "TRIPOD SETUP", data: "YOUR DATA", sensor: "SENSOR" };
+    Object.assign(m, { t: "SETTINGS", k: view === "athlete" ? "ATHLETE" : view === "podcal" ? "CALIBRATE POD" : names[viewArg] || "SETTINGS", sub: sensor.fw ? "Firmware " + A(sensor.fw) : "" });
+  } else return null;   // level and the jump test have their own screens
+  return m;
+}
+function pageScreen(force) {
+  if (!sensor.connected || cap.sim || disp.on || sensor.role === "display") return;
+  const m = pageModel(); if (!m) return;
+  const b = { t: m.t.slice(0, 23), k: m.k.slice(0, 23), v: m.v.slice(0, 13), u: m.u, sub: m.sub.slice(0, 43), live: m.live };
+  m.cells.slice(0, 3).forEach((c, i) => { b["k" + (i + 1)] = c[0].slice(0, 13); b["v" + (i + 1)] = c[1].slice(0, 13); b["u" + (i + 1)] = c[2]; });
+  const sig = JSON.stringify(b);
+  if (!force && sig === pageScreen.sig && Date.now() - (pageScreen.at || 0) < 4000) return;
+  pageScreen.sig = sig; pageScreen.at = Date.now();
+  fetch("/page", { method: "POST", body: new URLSearchParams(b), cache: "no-store" }).catch(() => {});
 }
 function podMessage(m, id) {
   const [what, res] = m.split(":"), who = (sensor.pods || []).length > 1 ? `${podName(id)}: ` : "";
@@ -4292,6 +4347,7 @@ function render() {
   const pr = $("#podRest"); if (pr) pr.onchange = () => { const v = parseFloat(pr.value); if (v > 0) { settings.podRest = lvImperial() ? v * 0.0254 : v / 100; saveSettings(); } };
   const pf = $("#podFwFile"); if (pf) pf.onchange = () => podFirmware(pf.files[0]);
   bumpBar();
+  pageScreen();
 }
 function nav(v, arg) { backStack.push([view, viewArg]); go(v, arg); }
 function back() { const p = backStack.pop(); if (p) go(p[0], p[1], true); else go("home"); }

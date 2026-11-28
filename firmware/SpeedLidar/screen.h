@@ -129,8 +129,8 @@ static void bigNum(const char* v, float x, float y, int size, RGB col, const cha
 }
 
 // ---------- what to show (filled in by the firmware) ----------
-enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM, S_ABOUT, S_LEVEL, S_JUMP };
-static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim", "about", "level", "jump"};
+enum Screen : uint8_t { S_BOOT, S_WIFI, S_READY, S_ARMED, S_REC, S_SAVING, S_RESULT, S_NOLIDAR, S_UPDATE, S_AIM, S_ABOUT, S_LEVEL, S_JUMP, S_PAGE };
+static const char* const SCREEN_NAMES[] = {"boot", "wifi", "ready", "armed", "rec", "saving", "result", "nolidar", "update", "aim", "about", "level", "jump", "page"};
 struct Cell { char k[14], v[14], u[8]; };
 struct Model {
   Screen screen = S_BOOT;
@@ -161,6 +161,11 @@ struct Model {
   char jWho[24] = "", jPod[12] = "", jBest[8] = "", jNext[24] = "";
   int jPh = 0; float jV = 0; uint32_t jAirMs = 0;
   bool jRes = false; char jH[8] = "", jHs[8] = "", jHm[8] = "", jRWho[24] = "";
+  // is the LiDAR sending? When it isn't, a small NO LIDAR mark sits at the right of the strip (no full-screen warning)
+  bool lidar = true;
+  // the app's page, mirrored in its simplest form: a title, one headline number, up to three small ones, a line of words
+  char pgTitle[24] = "", pgK[24] = "", pgV[14] = "", pgU[8] = "", pgSub[44] = "";
+  Cell pg[3]; int nPg = 0;
 };
 
 static void fmtFt(char* out, size_t n, float m) {
@@ -173,6 +178,13 @@ static void fmtDist(const Model& M, char* out, size_t n, float m, int dp = 2) { 
 static void strip(const Model& M, const char* label, RGB col) {
   rect(0, 0, W, 22, col);
   text(F_XB15, label, 8, 16, BG);
+  if (!M.lidar) {   // no LiDAR: a dark pill with a red dot, like NO SENSOR in the app
+    float w = measure(F_B11, "NO LIDAR") + 20, x = W - 6 - w;
+    rrect(x, 3, w, 16, 8, BG); rrect(x + 5, 8, 6, 6, 3, RED); text(F_B11, "NO LIDAR", x + 14, 15, RED);
+    char n[6]; snprintf(n, sizeof n, "%d", M.phones);
+    text(F_B11, n, x - 15, 15, BG, RIGHT); rect(x - 12, 6, 6, 10, BG); rect(x - 11, 7, 4, 7, col);
+    return;
+  }
   // right: phones (number + a little phone) and the beam's signal bars
   char n[6]; snprintf(n, sizeof n, "%d", M.phones);
   text(F_B11, n, W - 50, 15, BG, RIGHT);
@@ -281,6 +293,20 @@ static void drawResult(const Model& M) {
     bigNum(M.cells[i].v, x, 140, 18, FG, M.cells[i].u, LEFT, cw - 6);
   }
   foot(M.footL, M.footR);
+}
+// The app's page in its simplest form (Home, Sessions, Analytics, Settings...), so the screen follows the phone.
+static void drawPage(const Model& M) {
+  strip(M, M.pgTitle[0] ? M.pgTitle : "LiDAR SENSOR", PURPLE);
+  if (M.pgV[0]) { text(F_B13, M.pgK, 10, 42, DIM); bigNum(M.pgV, 10, 100, 64, FG, M.pgU, LEFT, W - 20); }
+  else { text(F_XB24, M.pgK, 10, 64, FG); text(F_S13, M.pgSub, 10, 88, DIM); }
+  float cw = 102;
+  for (int i = 0; i < M.nPg; i++) {
+    float x = 10 + i * cw;
+    text(F_B11, M.pg[i].k, x, 120, DIM);
+    bigNum(M.pg[i].v, x, 140, 18, FG, M.pg[i].u, LEFT, cw - 6);
+  }
+  char r[16]; snprintf(r, sizeof r, "%d phone%s", M.phones, M.phones == 1 ? "" : "s");
+  foot(M.pgV[0] ? M.pgSub : "", r);
 }
 static void drawNoLidar(const Model& M) {
   strip(M, "NO LIDAR", AMBER);
@@ -447,6 +473,7 @@ static void draw(const Model& M) {
     case S_ABOUT: drawAbout(M); break;
     case S_LEVEL: drawLevel(M); break;
     case S_JUMP: drawJump(M); break;
+    case S_PAGE: drawPage(M); break;
   }
 }
 
