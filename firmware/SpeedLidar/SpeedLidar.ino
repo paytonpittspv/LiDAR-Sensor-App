@@ -569,6 +569,8 @@ namespace jumpm {
   volatile uint32_t until = 0;
   char who[24] = "", pod[12] = "", best[8] = "", next[24] = "";
   bool res = false; char h[8] = "", hs[8] = "", hm[8] = "", rwho[24] = "";
+  // a simulated jump in the app drives the same live screen (set, the rising bar, landed) without a pod
+  volatile int simPh = -1; volatile float simV = 0; volatile uint32_t simAirAt = 0, simUntil = 0;
 }
 // the app's current page, sent by the controller every few seconds while it is open (POST /page)
 namespace pagem {
@@ -624,7 +626,8 @@ void screenTask(void*) {
       strlcpy(M.jWho, jumpm::who, sizeof M.jWho); strlcpy(M.jPod, jumpm::pod, sizeof M.jPod); strlcpy(M.jBest, jumpm::best, sizeof M.jBest); strlcpy(M.jNext, jumpm::next, sizeof M.jNext);
       M.jRes = jumpm::res; strlcpy(M.jH, jumpm::h, sizeof M.jH); strlcpy(M.jHs, jumpm::hs, sizeof M.jHs); strlcpy(M.jHm, jumpm::hm, sizeof M.jHm); strlcpy(M.jRWho, jumpm::rwho, sizeof M.jRWho);
       xSemaphoreGive(uiLock);
-      uint32_t airAt = 0; M.jPh = podPhase(M.jV, airAt); M.jAirMs = airAt ? now - airAt : 0;
+      if (jumpm::simPh >= 0 && (int32_t)(jumpm::simUntil - now) > 0) { M.jPh = jumpm::simPh; M.jV = jumpm::simV; M.jAirMs = M.jPh == 2 ? now - jumpm::simAirAt : 0; }
+      else { uint32_t airAt = 0; M.jPh = podPhase(M.jV, airAt); M.jAirMs = airAt ? now - airAt : 0; }
     }
     else if (!lidarSeen && now - boot < 4000) s = scr::S_BOOT;
     else if (st == ST_SET) s = scr::S_ARMED;
@@ -1066,6 +1069,9 @@ String apiJump(const Params& p) {
   strlcpy(jumpm::h, p.get("h").c_str(), sizeof jumpm::h); strlcpy(jumpm::hs, p.get("hs").c_str(), sizeof jumpm::hs);
   strlcpy(jumpm::hm, p.get("hm").c_str(), sizeof jumpm::hm); strlcpy(jumpm::rwho, p.get("rw").c_str(), sizeof jumpm::rwho);
   if (p.num("off", 0)) jumpm::until = 0;
+  { int sph = (int)p.num("sph", -1);
+    if (sph >= 0) { if (sph == 2 && jumpm::simPh != 2) jumpm::simAirAt = millis(); jumpm::simV = p.get("sv").toFloat(); jumpm::simPh = sph; jumpm::simUntil = millis() + 4000; }
+    else jumpm::simPh = -1; }
   xSemaphoreGive(uiLock);
   return "{\"ok\":true}";
 }
