@@ -2243,6 +2243,33 @@ function sprintProfileCard(mine, tr) {
   return h;
 }
 
+// First thing in vault analytics: how fast they get, and how much of it is still there in the last 5 m.
+function vaultSpeedCard(tr) {
+  const ok = tr.filter((r) => r.res.last5 && r.res.top && r.res.top.speed);
+  if (!ok.length) return "";
+  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  const T = ok.map((r) => r.res.top.speed), L = ok.map((r) => r.res.last5.speed);
+  const aT = avg(T), aL = avg(L), d = aL - aT, pct = (100 * aL) / aT;
+  const col = pct >= 97 ? "var(--good)" : pct >= 94 ? "var(--warn)" : "var(--bad)";
+  const word = pct >= 97 ? "Holds speed into the box" : pct >= 94 ? "Eases off before the box" : "Slows a lot before the box";
+  const where = ok.map((r) => (r.res.startMarkFt != null && r.res.top.dist != null ? r.res.startMarkFt - r.res.top.dist / FT : null)).filter((x) => x != null && x > 0);
+  // paired bars, oldest to newest: top speed and last 5 m for each of the last eight jumps
+  const last = ok.slice(0, 8).reverse(), n = last.length, W = 320, H = 118, y0 = 96, lo = Math.min(...last.map((r) => r.res.last5.speed)) - 0.5, hi = Math.max(...last.map((r) => r.res.top.speed)) + 0.05;
+  const Y = (v) => y0 - ((v - lo) / (hi - lo)) * (y0 - 16), slot = W / n, bw = Math.min(22, slot * 0.3);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;margin-top:10px" role="img" aria-label="Top speed and last 5 m, jump by jump">`;
+  last.forEach((r, i) => { const cx = slot * (i + 0.5), t = r.res.top.speed, l = r.res.last5.speed;
+    svg += `<g data-act="open-run" data-id="${r.id}" style="cursor:pointer"><rect x="${(cx - bw - 1.5).toFixed(1)}" y="${Y(t).toFixed(1)}" width="${bw.toFixed(1)}" height="${(y0 - Y(t)).toFixed(1)}" rx="3" fill="var(--purple)"/><rect x="${(cx + 1.5).toFixed(1)}" y="${Y(l).toFixed(1)}" width="${bw.toFixed(1)}" height="${(y0 - Y(l)).toFixed(1)}" rx="3" fill="var(--blue)"/>
+      <text x="${cx.toFixed(1)}" y="${(Y(t) - 4).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--text)" font-family="var(--display)">${(l - t >= -0.005 ? "0.00" : (l - t).toFixed(2))}</text>
+      <text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${dayLabel(dayKey(r.ts)).replace(/^[A-Za-z]+ /, (m) => m)}</text></g>`; });
+  svg += `<line x1="0" x2="${W}" y1="${y0}" y2="${y0}" stroke="var(--line)"/></svg>`;
+  return `<div class="card"><div class="between"><div class="label">Speed \u00b7 top speed against the last 5 m</div><span class="small muted">${ok.length} jump${ok.length > 1 ? "s" : ""}</span></div>
+    <div class="jx jx2 jx3"><div><span>Top speed</span><b>${f2(aT)}<small>m/s</small></b><em>${ok.length > 1 ? `best ${f2(Math.max(...T))}` : "this jump"}</em></div>
+      <div><span>Last 5 m</span><b style="color:var(--blue)">${f2(aL)}<small>m/s</small></b><em>${ok.length > 1 ? `best ${f2(Math.max(...L))}` : "this jump"}</em></div>
+      <div><span>Difference</span><b style="color:${col}">${d >= -0.005 ? "0.00" : "\u2212" + f2(-d)}<small>m/s</small></b><em>${pct.toFixed(1)}% carried</em></div></div>
+    <div style="margin-top:10px;font-family:var(--display);font-weight:800;font-size:19px;text-transform:uppercase;letter-spacing:.3px;color:${col}">${word}</div>
+    <div class="small muted">${ok.length > 1 ? "Averages over these jumps. " : ""}Top speed is the fastest point of the run; last 5 m is the speed into the box.${where.length ? ` Top speed comes about <b style="color:var(--text)">${ftLabel(avg(where))}</b> from the box.` : ""}</div>
+    ${svg}<div class="small muted" style="margin-top:2px"><b style="color:var(--purple)">\u25a0</b> top speed \u00b7 <b style="color:var(--blue)">\u25a0</b> last 5 m \u00b7 the number is the drop in m/s. Tap a pair to open that jump.</div></div>`;
+}
 function vaultProfileCard(tr) {
   const ok = tr.filter((r) => r.res.last5);
   if (!ok.length) return "";
@@ -2384,7 +2411,7 @@ function analyticsHTML() {
     progress = `<div class="card"><div class="between"><div class="label">Best ${isSprint ? "time" : "last 5 m"} per day</div><div class="small muted">${isSprint ? "lower is better" : "higher is better"}</div></div>${chart}<div class="small muted">Tap a dot to open that session.</div></div>`;
   }
   // what matters for this test
-  if (!isSprint) { h += vaultProfileCard(tr); if (!(SETUPS[anState.test.split("-")[1]] || {}).pole) h += vaultHipCard(tr); }
+  if (!isSprint) { h += vaultSpeedCard(tr) + vaultProfileCard(tr); if (!(SETUPS[anState.test.split("-")[1]] || {}).pole) h += vaultHipCard(tr); }
   // records
   h += `<div class="card"><div class="label" style="margin-bottom:6px">Personal records · ${testName(anState.test)}</div><div class="list">`;
   const rec = (label, pick, better, fmt) => {
