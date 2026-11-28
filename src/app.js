@@ -1760,9 +1760,9 @@ function jumpHTML() {
   if (!athletes.length) h += stage("d-amber", "No athletes", "", `<div class="st-ev" style="color:var(--text)">Add who's jumping first.</div>`);
   else if (shown) {
     const who = esc(athleteById(shown.athleteId).name);
-    h += stage("d-blue", "Result", who, `<div class="st-label">Takeoff to peak${shown.sim ? " · simulated" : ""}${shown.pod && on.length > 1 ? ` · <span style="color:${podCss(shown.pod)}">${podName(shown.pod)}</span>` : ""}</div><div class="st-big" style="color:var(--blue)">${fmtJump(shown.h)}<small>cm</small></div>
+    h += stage("d-blue", "Result", who, `<div class="st-label">Takeoff to peak${shown.sim ? " · simulated" : ""}${shown.pod && on.length > 1 ? ` · <span style="color:${podCss(shown.pod)}">${podName(shown.pod)}</span>` : ""}</div><div class="st-big" style="color:var(--blue)">${fmtJump(shown.h)}<small>cm</small></div>${jumpHeadline(shown)}
       <div class="st-ev">${shown.hStand != null ? `Standing to peak <b style="color:var(--text)">${fmtJump(shown.hStand)} cm</b> · ` : ""}${fmtJumpAlt(shown.h)}</div>
-      ${shown.tto != null ? `<div class="jx"><div><span>Time to takeoff</span><b>${shown.tto.toFixed(2)}<small>s</small></b></div><div><span>RSImod</span><b>${shown.rsi.toFixed(2)}</b></div><div><span>Peak power</span><b>${fmtPow(shown).replace(/ (W\/kg|W)$/, "<small>$1</small>")}</b></div></div>` : ""}
+      ${jumpTiles(shown)}
       <div class="small muted" style="margin-top:8px">A jump mat would read ${fmtJump(shown.hFlight)} cm (flight ${shown.t.toFixed(3)} s)${shown.agree ? "" : ": higher because of the lower landing, which doesn't change the numbers above"}${shown.cal ? "" : " · pod not calibrated"}</div>`);
     const nx = athletes.find((x) => x.id === cap.athleteId);
     h += `<div class="card between"><div><div class="small muted">Next up</div><b style="font-size:20px">${esc(nx ? nx.name : "")}</b><div class="small muted">${podOn ? "Switches when someone stands still with a pod on" : ""}</div></div><button class="btn primary" style="white-space:nowrap" data-act="jump-next">Next ›</button></div>`;
@@ -1795,6 +1795,30 @@ function jumpHTML() {
 // explosiveness, from the countermovement: time to takeoff (start of the dip to leaving the ground), RSImod
 // (jump height ÷ time to takeoff, m/s: higher = more height for less time) and peak power (W/kg; watts with body weight)
 const jkg = (aid) => { const a = athletes.find((x) => x.id === aid); return a && a.kg ? a.kg : null; };
+// A jump's numbers in plain terms: where each one sits against the same athlete's other jumps.
+// pos 0..1 runs from their weakest to their best; pct is how much better (+) or worse (-) than their usual.
+function jumpVs(j, key, lowerBetter) {
+  const o = jumps.filter((x) => x.athleteId === j.athleteId && x.id !== j.id && x[key] != null).map((x) => x[key]);
+  if (o.length < 2 || j[key] == null) return null;
+  const avg = o.reduce((a, b) => a + b, 0) / o.length, lo = Math.min(...o, j[key]), hi = Math.max(...o, j[key]);
+  const best = lowerBetter ? Math.min(...o) : Math.max(...o), isBest = lowerBetter ? j[key] < best : j[key] > best;
+  const pct = ((j[key] - avg) / avg) * 100 * (lowerBetter ? -1 : 1), span = hi - lo;
+  return { pct, isBest, best, pos: span > 0 ? (lowerBetter ? (hi - j[key]) / span : (j[key] - lo) / span) : 0.5 };
+}
+const jumpVsLine = (v) => (!v ? "" : v.isBest ? `<em class="up">\u2605 your best</em>` : Math.abs(v.pct) < 3 ? `<em>about your usual</em>` : v.pct > 0 ? `<em class="up">\u25b2 ${v.pct.toFixed(0)}% better</em>` : `<em class="dn">\u25bc ${(-v.pct).toFixed(0)}% off</em>`);
+const jumpMeter = (v) => (v ? `<i class="jm" title="your range"><u style="left:${(4 + 92 * Math.max(0, Math.min(1, v.pos))).toFixed(0)}%"></u></i>` : "");
+// the three tiles: plain names, the number, a dot on the athlete's own range (weakest to best), and a verdict
+function jumpTiles(j) {
+  if (j.tto == null) return "";
+  const q = jumpVs(j, "tto", true), r = jumpVs(j, "rsi"), w = jumpVs(j, "pwKg");
+  return `<div class="jx jx2"><div><span>Quickness</span><b>${j.tto.toFixed(2)}<small>s</small></b>${jumpMeter(q)}${jumpVsLine(q) || "<em>dip to takeoff</em>"}</div>
+    <div><span>Spring</span><b>${j.rsi.toFixed(2)}</b>${jumpMeter(r)}${jumpVsLine(r) || "<em>height per second</em>"}</div>
+    <div><span>Power</span><b>${fmtPow(j).replace(/ (W\/kg|W)$/, "<small>$1</small>")}</b>${jumpMeter(w)}${jumpVsLine(w) || "<em>peak</em>"}</div></div>`;
+}
+function jumpHeadline(j) {
+  const v = jumpVs(j, "h"); if (!v) return "";
+  return v.isBest ? `<div class="jhl up">\u2605 New best</div>` : `<div class="jhl">${Math.round((100 * j.h) / v.best)}% of your best <span>(${fmtJump(v.best)} ${jumpUnit()})</span></div>`;
+}
 const fmtPow = (j) => { if (j.pwKg == null) return "–"; const kg = jkg(j.athleteId); return kg ? `${Math.round(j.pwKg * kg).toLocaleString()} W` : `${j.pwKg.toFixed(1)} W/kg`; };
 // the rising bar while in the air: flies the takeoff speed (h = v·t − g·t²/2) up to its peak and holds it there.
 // A live preview; the real number comes from the full recording a moment after landing.
@@ -2429,13 +2453,13 @@ function jumpAnalyticsHTML(mine) {
     let ch = "";
     if (rk.length > 1) {
       const t0 = new Date(rk[0]).getTime(), RX = rk.map((d) => (new Date(d).getTime() - t0) / 864e5), RY = rk.map((d) => rd[d]), lo = Math.min(...RY), hi = Math.max(...RY), pd = Math.max(0.03, (hi - lo) * 0.25);
-      ch = lcSlot({ aria: "Best RSImod per day", h: 150, x0: -0.5, x1: Math.max(1, RX[RX.length - 1]) + 0.5, y0: lo - pd, y1: hi + pd, yUnit: "RSImod", yfmt: (t) => t.toFixed(2),
+      ch = lcSlot({ aria: "Best spring per day", h: 150, x0: -0.5, x1: Math.max(1, RX[RX.length - 1]) + 0.5, y0: lo - pd, y1: hi + pd, yUnit: "spring", yfmt: (t) => t.toFixed(2),
         xt: [RX[0], RX[RX.length - 1]], xfmt: (t) => dayLabel(rk[RX.indexOf(t)] || rk[0]), series: [{ x: RX, y: RY, color: "var(--pink)", w: 2.4, fill: true }], dots: RX.map((x, i) => ({ x, y: RY[i] })) });
     }
     h += `<div class="card"><div class="label">Explosiveness</div>
-      <div class="jx"><div><span>Takeoff time</span><b>${fast.tto.toFixed(2)}<small>s</small></b></div><div><span>Best RSImod</span><b>${rsiB.rsi.toFixed(2)}</b></div><div><span>Peak power</span><b>${fmtPow(pwB).replace(/ (W\/kg|W)$/, "<small>$1</small>")}</b></div></div>
-      <div class="small muted" style="margin:8px 0 ${ch ? 4 : 0}px">Time to takeoff: from starting the dip to leaving the ground (average ${avgT.toFixed(2)} s): shorter is snappier. RSImod: jump height ÷ that time, so it rewards height from a quick dip, not a big slow one.${jkg(anState.athleteId) ? "" : " Add body weight for watts."}</div>
-      ${ch ? `<div class="label" style="margin-top:6px">Best RSImod per day</div>${ch}` : ""}</div>`;
+      <div class="jx jx2"><div><span>Quickest</span><b>${fast.tto.toFixed(2)}<small>s</small></b><em>usual ${avgT.toFixed(2)} s</em></div><div><span>Best spring</span><b>${rsiB.rsi.toFixed(2)}</b><em>usual ${(xs.reduce((s, j) => s + j.rsi, 0) / xs.length).toFixed(2)}</em></div><div><span>Most power</span><b>${fmtPow(pwB).replace(/ (W\/kg|W)$/, "<small>$1</small>")}</b><em>${pwB.pwKg.toFixed(1)} W/kg</em></div></div>
+      <div class="small muted" style="margin:8px 0 ${ch ? 4 : 0}px"><b>Quickness</b>: seconds from starting the dip to leaving the ground. Lower is snappier. <b>Spring</b>: height for the time spent on the ground (coaches call it RSImod). Higher means a high jump from a quick dip, not a big slow one. <b>Power</b>: the hardest push of the jump.${jkg(anState.athleteId) ? "" : " Add body weight for watts."}</div>
+      ${ch ? `<div class="label" style="margin-top:6px">Best spring per day</div>${ch}` : ""}</div>`;
   }
   // compare: pick who (up to six), ranked bars, print the group report
   const withJ = athletes.filter((x) => jumps.some((j) => j.athleteId === x.id));
@@ -2449,12 +2473,12 @@ function jumpAnalyticsHTML(mine) {
       ${tops.map(({ a, j }) => `<div class="jrank${a.id === anState.athleteId ? " me" : ""}" data-act="an-ath" data-id="${a.id}"><span class="nm">${esc(a.name)}</span><span class="bar"><b style="width:${((100 * j.h) / mx).toFixed(1)}%"></b></span><span class="v">${cm(j.h)}</span></div>`).join("")}
       <button class="btn" style="width:100%;margin-top:10px" data-act="jcmp-report" ${sel.length > 1 ? "" : "disabled"}>Print group comparison (PDF)</button></div>`;
   }
-  h += `<h2>Jumps</h2><div class="card tw"><table class="jtab"><thead><tr><th>When</th><th>Height</th><th>Mat</th><th>Time</th><th>RSI</th><th></th></tr></thead><tbody>${mine.slice(0, 60).map((j) => `<tr>
+  h += `<h2>Jumps</h2><div class="card tw"><table class="jtab"><thead><tr><th>When</th><th>Height</th><th>Mat</th><th>Quick</th><th>Spring</th><th></th></tr></thead><tbody>${mine.slice(0, 60).map((j) => `<tr>
     <td style="white-space:nowrap"><b>${dayLabel(dayKey(j.ts))}</b><div class="small muted">${timeLabel(j.ts)}${j.sim ? " sim" : ""}</div></td>
     <td><b>${cm(j.h)}</b>${j.hStand != null ? `<div class="small muted">stand ${cm(j.hStand)}</div>` : ""}</td><td class="muted">${j.hFlight != null ? cm(j.hFlight) : "–"}</td>
     <td>${j.tto != null ? j.tto.toFixed(2) : "–"}</td><td>${j.rsi != null ? j.rsi.toFixed(2) : "–"}</td>
     <td style="width:1%"><button class="btn sm ghost" data-act="jump-del" data-id="${j.id}" aria-label="Delete">✕</button></td></tr>`).join("")}</tbody></table>
-    <div class="small muted" style="margin-top:8px">Height: takeoff to peak, cm (stand: standing to peak). Mat: what a jump mat would show. Time: time to takeoff, s. RSI: RSImod.</div></div>`;
+    <div class="small muted" style="margin-top:8px">Height: takeoff to peak, cm (stand: standing to peak). Mat: what a jump mat would show. Quick: seconds from the dip to takeoff. Spring: height for the time on the ground (RSImod).</div></div>`;
   return h;
 }
 
